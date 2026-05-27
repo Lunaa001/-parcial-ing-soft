@@ -1,4 +1,4 @@
-package com.iaperfumeadvisor.controller.public;
+package com.iaperfumeadvisor.controller.api;
 
 import com.iaperfumeadvisor.dto.response.PerfumeResponse;
 import com.iaperfumeadvisor.service.PerfumeService;

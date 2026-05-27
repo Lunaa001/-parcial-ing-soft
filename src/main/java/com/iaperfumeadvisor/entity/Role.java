@@ -1,7 +1,7 @@
 package com.iaperfumeadvisor.entity;
 
 import com.iaperfumeadvisor.enums.RoleType;
-import javax.persistence.*;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;

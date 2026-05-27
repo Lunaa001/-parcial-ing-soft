@@ -1,18 +1,18 @@
 package com.iaperfumeadvisor.validator;
 
-import com.iaperfumeadvisor.dto.request.admin.LoginRequest;
+import com.iaperfumeadvisor.dto.request.client.AddToCartRequest;
 import com.iaperfumeadvisor.exception.InvalidInputException;
 import org.springframework.stereotype.Component;
 
 @Component
-public class AuthValidator {
+public class CartValidator {
 
-    public void validate(LoginRequest request) {
-        if (request == null || request.getUsername() == null || request.getUsername().trim().isEmpty()) {
-            throw new InvalidInputException("Username cannot be empty");
+    public void validate(AddToCartRequest request) {
+        if (request == null || request.getPerfumeId() == null) {
+            throw new InvalidInputException("Perfume ID cannot be null");
         }
-        if (request.getPassword() == null || request.getPassword().trim().isEmpty()) {
-            throw new InvalidInputException("Password cannot be empty");
+        if (request.getQuantity() == null || request.getQuantity() <= 0) {
+            throw new InvalidInputException("Quantity must be greater than 0");
         }
     }
 }

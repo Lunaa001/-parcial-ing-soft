@@ -1,23 +1,22 @@
 package com.iaperfumeadvisor.service.impl;
 
-import com.iaperfumeadvisor.service.OpenAiService;
+import com.iaperfumeadvisor.dto.response.WhatsAppRedirectResponse;
+import com.iaperfumeadvisor.service.WhatsAppService;
 import org.springframework.stereotype.Service;
 
 @Service
-public class OpenAiServiceImpl implements OpenAiService {
+public class WhatsAppServiceImpl implements WhatsAppService {
 
     @Override
-    public String generateResponse(String prompt) {
-        return "Response to prompt: " + prompt;
+    public WhatsAppRedirectResponse getWhatsAppRedirect(String message) {
+        return WhatsAppRedirectResponse.builder()
+                .whatsappUrl("https://wa.me/")
+                .message(message)
+                .build();
     }
 
     @Override
-    public String analyzePreferences(String userInput) {
-        return "Analysis of preferences: " + userInput;
-    }
-
-    @Override
-    public String generateRecommendation(String preferences) {
-        return "Recommendations based on: " + preferences;
+    public String generateWhatsAppMessage(String cartSummary) {
+        return "Hello, I'm interested in: " + cartSummary;
     }
 }
