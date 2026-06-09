@@ -4,6 +4,7 @@ import com.iaperfumeadvisor.dto.request.admin.CreatePerfumeRequest;
 import com.iaperfumeadvisor.dto.request.admin.UpdatePerfumeRequest;
 import com.iaperfumeadvisor.dto.response.PerfumeResponse;
 import com.iaperfumeadvisor.entity.Perfume;
+import com.iaperfumeadvisor.enums.PerfumeCategory;
 import com.iaperfumeadvisor.service.PerfumeService;
 import com.iaperfumeadvisor.repository.PerfumeRepository;
 import com.iaperfumeadvisor.mapper.PerfumeMapper;
@@ -23,12 +24,24 @@ public class PerfumeServiceImpl implements PerfumeService {
 
     @Override
     public PerfumeResponse createPerfume(CreatePerfumeRequest request) {
-        return new PerfumeResponse();
+        Perfume perfume = Perfume.builder()
+                .name(request.getName())
+                .brand(request.getBrand())
+                .description(request.getDescription())
+                .category(request.getCategory())
+                .genderType(request.getGenderType())
+                .price(request.getPrice())
+                .stock(request.getStock())
+                .status(request.getStatus())
+                .imageUrl(request.getImageUrl())
+                .build();
+        Perfume saved = perfumeRepository.save(perfume);
+        return perfumeMapper.toResponse(saved);
     }
 
     @Override
     public PerfumeResponse updatePerfume(Long id, UpdatePerfumeRequest request) {
-        return new PerfumeResponse();
+        return PerfumeResponse.builder().build();
     }
 
     @Override
@@ -51,7 +64,8 @@ public class PerfumeServiceImpl implements PerfumeService {
 
     @Override
     public List<PerfumeResponse> getPerfumesByCategory(String category) {
-        return perfumeRepository.findByCategory(category)
+        PerfumeCategory perfumeCategory = PerfumeCategory.valueOf(category.toUpperCase());
+        return perfumeRepository.findByCategory(perfumeCategory)
                 .stream()
                 .map(perfumeMapper::toResponse)
                 .collect(Collectors.toList());

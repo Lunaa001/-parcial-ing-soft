@@ -3,8 +3,12 @@ package com.iaperfumeadvisor.entity;
 import com.iaperfumeadvisor.enums.PerfumeCategory;
 import com.iaperfumeadvisor.enums.PerfumeStatus;
 import com.iaperfumeadvisor.enums.GenderType;
-import javax.persistence.*;
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
@@ -15,21 +19,25 @@ import java.time.LocalDateTime;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class Perfume {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @NotBlank(message = "Name is required")
+    @Column(nullable = false, length = 255)
     private String name;
 
-    @Column(nullable = false)
+    @NotBlank(message = "Brand is required")
+    @Column(nullable = false, length = 100)
     private String brand;
 
     @Column(columnDefinition = "TEXT")
     private String description;
 
+    @NotNull(message = "Category is required")
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private PerfumeCategory category;
@@ -38,15 +46,21 @@ public class Perfume {
     @Column(nullable = false)
     private GenderType genderType;
 
-    @Column(nullable = false)
+    @NotNull(message = "Price is required")
+    @Positive(message = "Price must be positive")
+    @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal price;
 
+    @NotNull(message = "Stock is required")
+    @Column(nullable = false)
     private Integer stock;
 
+    @NotNull(message = "Status is required")
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private PerfumeStatus status;
 
+    @Column(length = 500)
     private String imageUrl;
 
     private Integer rating;

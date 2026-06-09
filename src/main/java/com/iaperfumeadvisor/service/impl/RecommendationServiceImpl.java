@@ -11,16 +11,20 @@ public class RecommendationServiceImpl implements RecommendationService {
     @Override
     public RecommendationResponse getRecommendations(RecommendationRequest request) {
         return RecommendationResponse.builder()
-                .recommendations(java.util.Collections.emptyList())
-                .explanation("Recommendations based on preferences")
+                .perfumeId(1L)
+                .perfumeName("Sample Perfume")
+                .matchScore(85.0)
+                .reason("Based on your preferences")
                 .build();
     }
 
     @Override
     public RecommendationResponse getRecommendationsByPreferences(String preferences) {
         return RecommendationResponse.builder()
-                .recommendations(java.util.Collections.emptyList())
-                .explanation("Recommendations based on preferences: " + preferences)
+                .perfumeId(1L)
+                .perfumeName("Recommended Perfume")
+                .matchScore(90.0)
+                .reason("Recommendations based on preferences: " + preferences)
                 .build();
     }
 }
