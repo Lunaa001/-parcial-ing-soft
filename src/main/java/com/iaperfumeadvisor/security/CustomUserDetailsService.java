@@ -1,25 +1,30 @@
 package com.iaperfumeadvisor.security;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import com.iaperfumeadvisor.entity.User;
+import com.iaperfumeadvisor.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
-import com.iaperfumeadvisor.repository.UserRepository;
 
 @Service
+@RequiredArgsConstructor
 public class CustomUserDetailsService implements UserDetailsService {
 
-    @Autowired
-    private UserRepository userRepository;
+    private final UserRepository userRepository;
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        return userRepository.findByUsername(username)
-                .map(user -> new org.springframework.security.core.userdetails.User(
-                        user.getUsername(),
-                        user.getPassword(),
-                        java.util.Collections.emptyList()))
+        User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+
+        return org.springframework.security.core.userdetails.User.builder()
+                .username(user.getUsername())
+                .password(user.getPassword())
+                .authorities(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()))
+                .disabled(!user.isEnabled())
+                .build();
     }
 }
