@@ -18,4 +18,8 @@ public interface PerfumeService {
     List<PerfumeResponse> getAllPerfumes();
 
     List<PerfumeResponse> getPerfumesByCategory(String category);
+
+    List<PerfumeResponse> getPerfumesByGender(String gender);
+
+    List<PerfumeResponse> getAvailablePerfumes();
 }
