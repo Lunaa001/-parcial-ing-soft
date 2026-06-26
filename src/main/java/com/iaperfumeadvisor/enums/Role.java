@@ -1,6 +1,6 @@
 package com.iaperfumeadvisor.enums;
 
-public enum RoleType {
+public enum Role {
     ADMIN,
-    USER
+    CLIENT
 }
