@@ -2,17 +2,21 @@ package com.iaperfumeadvisor.controller.api;
 
 import com.iaperfumeadvisor.dto.response.PerfumeResponse;
 import com.iaperfumeadvisor.service.PerfumeService;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/public/perfumes")
+@RequestMapping("/api/perfumes")
+@RequiredArgsConstructor
 public class PerfumeController {
 
-    @Autowired
-    private PerfumeService perfumeService;
+    private final PerfumeService perfumeService;
 
     @GetMapping
     public ResponseEntity<List<PerfumeResponse>> getAllPerfumes() {
@@ -27,5 +31,15 @@ public class PerfumeController {
     @GetMapping("/category/{category}")
     public ResponseEntity<List<PerfumeResponse>> getPerfumesByCategory(@PathVariable String category) {
         return ResponseEntity.ok(perfumeService.getPerfumesByCategory(category));
+    }
+
+    @GetMapping("/gender/{gender}")
+    public ResponseEntity<List<PerfumeResponse>> getPerfumesByGender(@PathVariable String gender) {
+        return ResponseEntity.ok(perfumeService.getPerfumesByGender(gender));
+    }
+
+    @GetMapping("/available")
+    public ResponseEntity<List<PerfumeResponse>> getAvailablePerfumes() {
+        return ResponseEntity.ok(perfumeService.getAvailablePerfumes());
     }
 }
