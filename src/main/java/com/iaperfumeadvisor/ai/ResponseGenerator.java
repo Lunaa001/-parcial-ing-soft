@@ -1,15 +1,26 @@
 package com.iaperfumeadvisor.ai;
 
+import com.iaperfumeadvisor.dto.response.RecommendationItem;
+import com.iaperfumeadvisor.dto.response.RecommendationResponse;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Component
 public class ResponseGenerator {
 
-    public String generateResponse(String aiResponse) {
-        return "AI Response: " + aiResponse;
-    }
+    public String generateFallbackResponse(RecommendationResponse recommendations) {
+        List<RecommendationItem> items = recommendations.getRecommendations();
+        if (items.isEmpty()) {
+            return "No encontre perfumes disponibles que coincidan con tu busqueda en este momento.";
+        }
 
-    public String generateRecommendationText(java.util.List<String> perfumes) {
-        return "Recommended perfumes: " + String.join(", ", perfumes);
+        String names = items.stream()
+                .limit(3)
+                .map(RecommendationItem::getName)
+                .collect(Collectors.joining(", "));
+
+        return "Encontre estas opciones que podrian interesarte: " + names + ".";
     }
 }
