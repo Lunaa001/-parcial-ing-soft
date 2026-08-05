@@ -5,13 +5,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class RecommendationResponse {
-    private Long perfumeId;
-    private String perfumeName;
-    private Double matchScore;
-    private String reason;
+    private String detectedCategory;
+    private String detectedGender;
+    private int totalMatches;
+    private List<RecommendationItem> recommendations;
 }

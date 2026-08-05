@@ -3,6 +3,7 @@ package com.iaperfumeadvisor.mapper;
 import com.iaperfumeadvisor.dto.request.admin.CreatePerfumeRequest;
 import com.iaperfumeadvisor.dto.request.admin.UpdatePerfumeRequest;
 import com.iaperfumeadvisor.dto.response.PerfumeResponse;
+import com.iaperfumeadvisor.dto.response.RecommendationItem;
 import com.iaperfumeadvisor.entity.Perfume;
 import org.springframework.stereotype.Component;
 
@@ -66,6 +67,20 @@ public class PerfumeMapper {
                 .status(perfume.getStatus().toString())
                 .imageUrl(perfume.getImageUrl())
                 .rating(perfume.getRating())
+                .build();
+    }
+
+    public RecommendationItem toRecommendationItem(Perfume perfume, double matchScore) {
+        return RecommendationItem.builder()
+                .perfumeId(perfume.getId())
+                .name(perfume.getName())
+                .brand(perfume.getBrand())
+                .category(perfume.getCategory().toString())
+                .genderType(perfume.getGenderType().toString())
+                .price(perfume.getPrice())
+                .stock(perfume.getStock())
+                .rating(perfume.getRating())
+                .matchScore(matchScore)
                 .build();
     }
 }

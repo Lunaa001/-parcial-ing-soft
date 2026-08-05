@@ -6,6 +6,4 @@ import com.iaperfumeadvisor.dto.response.RecommendationResponse;
 public interface RecommendationService {
 
     RecommendationResponse getRecommendations(RecommendationRequest request);
-
-    RecommendationResponse getRecommendationsByPreferences(String preferences);
 }
