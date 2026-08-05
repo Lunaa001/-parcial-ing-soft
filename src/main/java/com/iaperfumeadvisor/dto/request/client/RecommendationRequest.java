@@ -1,5 +1,7 @@
 package com.iaperfumeadvisor.dto.request.client;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -11,7 +13,7 @@ import lombok.NoArgsConstructor;
 @Builder
 public class RecommendationRequest {
 
-    private String preferences;
-    private String budget;
-    private String occasion;
+    @NotBlank(message = "El mensaje de preferencias es obligatorio")
+    @Size(max = 500, message = "El mensaje no puede superar los 500 caracteres")
+    private String message;
 }
