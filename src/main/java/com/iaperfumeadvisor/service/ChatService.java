@@ -6,6 +6,4 @@ import com.iaperfumeadvisor.dto.response.ChatResponse;
 public interface ChatService {
 
     ChatResponse sendMessage(ChatRequest request);
-
-    String processUserInput(String message);
 }

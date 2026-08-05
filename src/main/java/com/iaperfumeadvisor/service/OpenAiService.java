@@ -2,9 +2,5 @@ package com.iaperfumeadvisor.service;
 
 public interface OpenAiService {
 
-    String generateResponse(String prompt);
-
-    String analyzePreferences(String userInput);
-
-    String generateRecommendation(String preferences);
+    String generateChatResponse(String prompt);
 }
