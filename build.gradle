@@ -35,6 +35,10 @@ dependencies {
 	// POSTGRESQL
 	implementation 'org.postgresql:postgresql'
 
+	// FLYWAY (MIGRACIONES) - Spring Boot 4 modulariza la autoconfiguracion en su propio starter
+	implementation 'org.springframework.boot:spring-boot-starter-flyway'
+	implementation 'org.flywaydb:flyway-database-postgresql'
+
 	// LOMBOK
 	implementation 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
