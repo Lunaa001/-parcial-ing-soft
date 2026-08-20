@@ -22,4 +22,6 @@ public class PreferenceCriteria {
     private BigDecimal maxPrice;
     private Integer minRating;
     private List<String> keywords;
+    // Si el mensaje realmente pide perfumes/recomendaciones (vs. saludos, agradecimientos, charla general).
+    private boolean productIntent;
 }

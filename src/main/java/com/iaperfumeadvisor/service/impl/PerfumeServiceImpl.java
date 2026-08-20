@@ -5,7 +5,6 @@ import com.iaperfumeadvisor.dto.request.admin.UpdatePerfumeRequest;
 import com.iaperfumeadvisor.dto.response.PerfumeResponse;
 import com.iaperfumeadvisor.entity.Perfume;
 import com.iaperfumeadvisor.enums.GenderType;
-import com.iaperfumeadvisor.enums.PerfumeCategory;
 import com.iaperfumeadvisor.enums.PerfumeStatus;
 import com.iaperfumeadvisor.exception.InvalidInputException;
 import com.iaperfumeadvisor.exception.ResourceNotFoundException;
@@ -58,8 +57,7 @@ public class PerfumeServiceImpl implements PerfumeService {
 
     @Override
     public List<PerfumeResponse> getPerfumesByCategory(String category) {
-        PerfumeCategory perfumeCategory = parseEnum(PerfumeCategory.class, category, "category");
-        return toResponseList(perfumeRepository.findByCategory(perfumeCategory));
+        return toResponseList(perfumeRepository.findByCategory(category));
     }
 
     @Override

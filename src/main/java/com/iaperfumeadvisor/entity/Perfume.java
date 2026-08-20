@@ -1,10 +1,10 @@
 package com.iaperfumeadvisor.entity;
 
-import com.iaperfumeadvisor.enums.PerfumeCategory;
 import com.iaperfumeadvisor.enums.PerfumeStatus;
 import com.iaperfumeadvisor.enums.GenderType;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import lombok.AllArgsConstructor;
@@ -13,6 +13,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "perfumes")
@@ -37,10 +39,16 @@ public class Perfume {
     @Column(columnDefinition = "TEXT")
     private String description;
 
-    @NotNull(message = "Category is required")
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private PerfumeCategory category;
+    // Las 8 categorias fijas de PerfumeCategory se guardan aca por su nombre (ej: "FLORAL")
+    // para que el motor de recomendaciones las siga reconociendo; el admin puede sumar
+    // categorias propias en texto libre, que quedan solo para organizar el catalogo.
+    @NotEmpty(message = "At least one category is required")
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "perfume_categories", joinColumns = @JoinColumn(name = "perfume_id"))
+    @OrderColumn(name = "position")
+    @Column(name = "category", nullable = false, length = 100)
+    @Builder.Default
+    private List<String> categories = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

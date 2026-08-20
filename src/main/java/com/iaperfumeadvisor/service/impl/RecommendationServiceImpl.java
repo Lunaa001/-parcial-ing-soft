@@ -34,6 +34,7 @@ public class RecommendationServiceImpl implements RecommendationService {
         return RecommendationResponse.builder()
                 .detectedCategory(criteria.getCategory() != null ? criteria.getCategory().name() : null)
                 .detectedGender(criteria.getGenderType() != null ? criteria.getGenderType().name() : null)
+                .productIntent(criteria.isProductIntent())
                 .totalMatches(items.size())
                 .recommendations(items)
                 .build();

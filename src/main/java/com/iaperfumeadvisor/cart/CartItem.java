@@ -13,6 +13,7 @@ public class CartItem {
     private Long id;
     private Long perfumeId;
     private String perfumeName;
+    private String imageUrl;
     private Integer quantity;
     private BigDecimal pricePerUnit;
 

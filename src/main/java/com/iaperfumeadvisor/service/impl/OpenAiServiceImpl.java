@@ -27,7 +27,7 @@ public class OpenAiServiceImpl implements OpenAiService {
     @Value("${gemini.api-key:}")
     private String apiKey;
 
-    @Value("${gemini.model:gemini-3.6-flash}")
+    @Value("${gemini.model:gemini-flash-lite-latest}")
     private String model;
 
     @Value("${gemini.api-url:https://generativelanguage.googleapis.com/v1beta}")
@@ -40,10 +40,13 @@ public class OpenAiServiceImpl implements OpenAiService {
         }
 
         try {
+            // maxOutputTokens acota la respuesta a algo del largo de un mensaje de chat real:
+            // ademas de leerse mejor, un modelo que genera menos tokens responde bastante mas rapido.
             Map<String, Object> requestBody = Map.of(
                     "contents", List.of(Map.of(
                             "parts", List.of(Map.of("text", prompt))
-                    ))
+                    )),
+                    "generationConfig", Map.of("maxOutputTokens", 220)
             );
 
             String url = apiBaseUrl + "/models/" + model + ":generateContent?key=" + apiKey;
@@ -62,7 +65,7 @@ public class OpenAiServiceImpl implements OpenAiService {
             }
 
             JsonNode root = objectMapper.readTree(response.body());
-            return root.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText().trim();
+            return extractText(root);
 
         } catch (IOException ex) {
             throw new BusinessException("Error de comunicacion con Gemini", ex);
@@ -70,5 +73,20 @@ public class OpenAiServiceImpl implements OpenAiService {
             Thread.currentThread().interrupt();
             throw new BusinessException("Llamada a Gemini interrumpida", ex);
         }
+    }
+
+    // Algunos modelos (los que tienen "thinking") devuelven primero una parte con su
+    // razonamiento interno (marcada "thought": true) y despues la respuesta real.
+    // Nos quedamos solo con las partes que NO son razonamiento.
+    private String extractText(JsonNode root) {
+        JsonNode parts = root.path("candidates").get(0).path("content").path("parts");
+        StringBuilder text = new StringBuilder();
+        for (JsonNode part : parts) {
+            if (part.path("thought").asBoolean(false)) {
+                continue;
+            }
+            text.append(part.path("text").asText(""));
+        }
+        return text.toString().trim();
     }
 }

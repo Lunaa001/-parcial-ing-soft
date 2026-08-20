@@ -15,7 +15,7 @@ public class PerfumeMapper {
                 .name(request.getName())
                 .brand(request.getBrand())
                 .description(request.getDescription())
-                .category(request.getCategory())
+                .categories(request.getCategories())
                 .genderType(request.getGenderType())
                 .price(request.getPrice())
                 .stock(request.getStock())
@@ -34,8 +34,8 @@ public class PerfumeMapper {
         if (request.getDescription() != null) {
             perfume.setDescription(request.getDescription());
         }
-        if (request.getCategory() != null) {
-            perfume.setCategory(request.getCategory());
+        if (request.getCategories() != null) {
+            perfume.setCategories(request.getCategories());
         }
         if (request.getGenderType() != null) {
             perfume.setGenderType(request.getGenderType());
@@ -60,7 +60,7 @@ public class PerfumeMapper {
                 .name(perfume.getName())
                 .brand(perfume.getBrand())
                 .description(perfume.getDescription())
-                .category(perfume.getCategory().toString())
+                .categories(perfume.getCategories())
                 .genderType(perfume.getGenderType().toString())
                 .price(perfume.getPrice())
                 .stock(perfume.getStock())
@@ -75,7 +75,9 @@ public class PerfumeMapper {
                 .perfumeId(perfume.getId())
                 .name(perfume.getName())
                 .brand(perfume.getBrand())
-                .category(perfume.getCategory().toString())
+                .description(perfume.getDescription())
+                .imageUrl(perfume.getImageUrl())
+                .categories(perfume.getCategories())
                 .genderType(perfume.getGenderType().toString())
                 .price(perfume.getPrice())
                 .stock(perfume.getStock())

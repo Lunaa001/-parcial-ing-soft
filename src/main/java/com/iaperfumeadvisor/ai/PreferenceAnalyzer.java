@@ -9,6 +9,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 @Component
 public class PreferenceAnalyzer {
@@ -48,6 +49,18 @@ public class PreferenceAnalyzer {
             "unisex", GenderType.UNISEX
     );
 
+    // Palabras que indican que la persona esta pidiendo perfumes/recomendaciones,
+    // a diferencia de un saludo, agradecimiento o charla general.
+    private static final Set<String> INTENT_KEYWORDS = Set.of(
+            "perfume", "perfumes", "fragancia", "fragancias", "aroma", "aromas",
+            "locion", "lociones", "colonia", "colonias", "esencia",
+            "recomendar", "recomendame", "recomendacion", "recomendaciones", "recomiendame", "recomendas",
+            "busco", "buscando", "buscar", "quiero", "necesito", "queria", "tenes", "tienen",
+            "regalo", "regalar", "opciones", "sugerencia", "sugerime", "sugerencias",
+            "comprar", "precio", "precios", "catalogo", "disponible", "disponibles",
+            "similar", "similares", "parecido", "parecidos", "parecida", "parecidas", "uso", "usaba"
+    );
+
     public PreferenceCriteria analyze(String message) {
         List<String> tokens = tokenize(message);
 
@@ -63,10 +76,15 @@ public class PreferenceAnalyzer {
                 .findFirst()
                 .orElse(null);
 
+        boolean productIntent = category != null
+                || genderType != null
+                || tokens.stream().anyMatch(INTENT_KEYWORDS::contains);
+
         return PreferenceCriteria.builder()
                 .category(category)
                 .genderType(genderType)
                 .keywords(tokens)
+                .productIntent(productIntent)
                 .build();
     }
 
