@@ -41,6 +41,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/perfumes/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/recommendations/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/chat/**").permitAll()
+                .requestMatchers("/api/cart/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/uploads/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/admin/perfumes/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/admin/perfumes/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/admin/perfumes/**").hasRole("ADMIN")

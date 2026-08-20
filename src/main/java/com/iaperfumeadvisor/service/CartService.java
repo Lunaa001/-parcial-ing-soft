@@ -3,16 +3,17 @@ package com.iaperfumeadvisor.service;
 import com.iaperfumeadvisor.dto.request.client.AddToCartRequest;
 import com.iaperfumeadvisor.dto.request.client.UpdateCartItemRequest;
 import com.iaperfumeadvisor.dto.response.CartResponse;
+import com.iaperfumeadvisor.dto.response.WhatsAppRedirectResponse;
 
 public interface CartService {
 
-    CartResponse getCart();
+    CartResponse getCart(String cartId);
 
-    CartResponse addItem(AddToCartRequest request);
+    CartResponse addItem(String cartId, AddToCartRequest request);
 
-    CartResponse updateItem(UpdateCartItemRequest request);
+    CartResponse updateItem(String cartId, UpdateCartItemRequest request);
 
-    CartResponse removeItem(Long cartItemId);
+    CartResponse removeItem(String cartId, Long perfumeId);
 
-    CartResponse checkout();
+    WhatsAppRedirectResponse checkout(String cartId);
 }

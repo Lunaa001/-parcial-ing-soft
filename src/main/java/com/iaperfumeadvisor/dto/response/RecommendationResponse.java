@@ -14,6 +14,7 @@ import java.util.List;
 public class RecommendationResponse {
     private String detectedCategory;
     private String detectedGender;
+    private boolean productIntent;
     private int totalMatches;
     private List<RecommendationItem> recommendations;
 }

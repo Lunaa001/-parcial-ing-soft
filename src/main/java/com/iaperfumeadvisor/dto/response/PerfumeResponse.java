@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -15,7 +16,7 @@ public class PerfumeResponse {
     private String name;
     private String brand;
     private String description;
-    private String category;
+    private List<String> categories;
     private String genderType;
     private BigDecimal price;
     private Integer stock;

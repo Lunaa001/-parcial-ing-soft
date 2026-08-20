@@ -11,6 +11,10 @@ import java.util.stream.Collectors;
 public class ResponseGenerator {
 
     public String generateFallbackResponse(RecommendationResponse recommendations) {
+        if (!recommendations.isProductIntent()) {
+            return "Hola! Contame que tipo de perfume estas buscando y te ayudo a encontrar algo.";
+        }
+
         List<RecommendationItem> items = recommendations.getRecommendations();
         if (items.isEmpty()) {
             return "No encontre perfumes disponibles que coincidan con tu busqueda en este momento.";

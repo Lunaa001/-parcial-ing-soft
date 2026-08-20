@@ -14,6 +14,9 @@ application-prod.properties
 logs/
 *.log
 
+### Fotos de productos subidas por el admin ###
+/uploads/
+
 ### Environment Variables ###
 .env
 .env.local
