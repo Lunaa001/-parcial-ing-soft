@@ -1,6 +1,6 @@
 package com.iaperfumeadvisor.config;
 
-import com.iaperfumeadvisor.service.OpenAiService;
+import com.iaperfumeadvisor.service.GroqService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -21,14 +21,14 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 public class GroqWarmupInitializer {
 
-    private final OpenAiService openAiService;
+    private final GroqService groqService;
 
     @EventListener(ApplicationReadyEvent.class)
     public void warmUp() {
         CompletableFuture.runAsync(() -> {
             try {
                 long start = System.currentTimeMillis();
-                openAiService.generateChatResponse("Responde unicamente con: ok", List.of(), "hola", true);
+                groqService.generateChatResponse("Responde unicamente con: ok", List.of(), "hola", true);
                 log.info("Groq precalentado en {} ms", System.currentTimeMillis() - start);
             } catch (Exception ex) {
                 log.warn("No se pudo precalentar Groq: {}", ex.getMessage());

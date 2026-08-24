@@ -16,6 +16,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+// Producto del catalogo tal como lo carga el admin; es la fuente de verdad que consume tanto la
+// tienda (catalogo, carrito) como el motor de recomendaciones/IA para saber que ofrecer.
 @Entity
 @Table(name = "perfumes")
 @Data

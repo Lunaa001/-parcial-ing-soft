@@ -20,6 +20,8 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 
+// Configuracion central de Spring Security: JWT stateless (sin sesiones), que rutas son
+// publicas vs. cuales requieren login/rol ADMIN, y el manejo de errores de auth/autorizacion.
 @Configuration
 @EnableWebSecurity
 @RequiredArgsConstructor
@@ -41,6 +43,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/perfumes/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/recommendations/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/chat/**").permitAll()
+                // El carrito no requiere login: no hay cuentas de cliente, se identifica por un id
+                // que genera y guarda el propio frontend (ver CartStore).
                 .requestMatchers("/api/cart/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/uploads/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/admin/perfumes/**").hasRole("ADMIN")

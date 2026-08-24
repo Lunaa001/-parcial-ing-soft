@@ -14,6 +14,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+// Conecta el pipeline algoritmico (PreferenceAnalyzer + RecommendationEngine) con la capa de
+// DTOs de la API: es el punto que expone el endpoint de recomendaciones y el que usa ChatService
+// para saber que productos ofrecer antes de hablar con la IA.
 @Service
 @RequiredArgsConstructor
 public class RecommendationServiceImpl implements RecommendationService {

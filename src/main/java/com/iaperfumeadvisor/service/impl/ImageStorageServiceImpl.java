@@ -17,6 +17,8 @@ import java.nio.file.Path;
 import java.util.Set;
 import java.util.UUID;
 
+// Guarda las fotos de producto en disco local (no en un bucket externo): alcanza para el
+// tamaño de catalogo actual y evita depender de un servicio de almacenamiento pago.
 @Service
 public class ImageStorageServiceImpl implements ImageStorageService {
 
@@ -40,6 +42,8 @@ public class ImageStorageServiceImpl implements ImageStorageService {
             Path perfumesDir = Path.of(uploadDir, "perfumes");
             Files.createDirectories(perfumesDir);
 
+            // Nombre random en vez del nombre original: evita colisiones entre archivos y que
+            // alguien adivine/pisen rutas de otras fotos ya subidas.
             String filename = UUID.randomUUID() + extensionFor(contentType);
             Path destination = perfumesDir.resolve(filename);
 

@@ -10,6 +10,8 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 
+// Genera y valida los JWT que usa la autenticacion stateless (ver SecurityConfig): el rol viaja
+// como claim propio en el token para no tener que ir a la base en cada request.
 @Component
 public class JwtService {
 

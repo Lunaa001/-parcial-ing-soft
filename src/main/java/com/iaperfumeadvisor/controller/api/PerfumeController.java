@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+// Consulta publica de catalogo (sin login) para la tienda: listar, ver detalle y filtrar por
+// categoria/genero/disponibilidad. La gestion (alta/edicion/borrado) es de AdminPerfumeController.
 @RestController
 @RequestMapping("/api/perfumes")
 @RequiredArgsConstructor

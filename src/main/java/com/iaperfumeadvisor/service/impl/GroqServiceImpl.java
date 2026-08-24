@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iaperfumeadvisor.dto.request.client.ChatHistoryItem;
 import com.iaperfumeadvisor.exception.BusinessException;
-import com.iaperfumeadvisor.service.OpenAiService;
+import com.iaperfumeadvisor.service.GroqService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -18,8 +18,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+// Cliente HTTP crudo (sin SDK) contra la API de Groq, con formato de mensajes estilo OpenAI.
+// Elige entre el modelo con busqueda agentica y el modelo de reserva de texto plano segun
+// "allowSearch" (ver GroqService/ChatServiceImpl para el motivo).
 @Service
-public class OpenAiServiceImpl implements OpenAiService {
+public class GroqServiceImpl implements GroqService {
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))

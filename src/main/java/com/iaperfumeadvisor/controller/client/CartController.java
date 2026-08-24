@@ -60,4 +60,10 @@ public class CartController {
     public ResponseEntity<WhatsAppRedirectResponse> checkout(@RequestHeader("X-Cart-Id") String cartId) {
         return ResponseEntity.ok(cartService.checkout(cartId));
     }
+
+    // Se llama aparte de /checkout, solo cuando el front confirma que WhatsApp se abrio bien.
+    @DeleteMapping
+    public ResponseEntity<CartResponse> clearCart(@RequestHeader("X-Cart-Id") String cartId) {
+        return ResponseEntity.ok(cartService.clearCart(cartId));
+    }
 }

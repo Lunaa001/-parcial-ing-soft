@@ -10,7 +10,6 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 public class CartItem {
 
-    private Long id;
     private Long perfumeId;
     private String perfumeName;
     private String imageUrl;

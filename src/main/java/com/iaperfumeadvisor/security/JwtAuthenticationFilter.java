@@ -17,6 +17,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
+// Se ejecuta una vez por request (antes del filtro estandar de user/password): si viene un
+// Bearer token valido, autentica al usuario en el SecurityContext para el resto de la cadena.
+// Si el token esta vencido/es invalido, no corta el request aca: deja el motivo en un atributo
+// para que JwtAuthenticationEntryPoint recien ahi responda 401 (asi rutas publicas con un token
+// viejo en el header no se rompen, siguen funcionando como anonimas).
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {

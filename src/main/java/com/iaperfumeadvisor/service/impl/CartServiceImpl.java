@@ -20,6 +20,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.Optional;
 
+// Logica del carrito en memoria (ver CartStore): agregar/actualizar/quitar items validando
+// stock contra el catalogo real, y el "checkout" que arma el pedido para WhatsApp (no hay pago
+// online en esta app).
 @Service
 @RequiredArgsConstructor
 public class CartServiceImpl implements CartService {
@@ -47,7 +50,6 @@ public class CartServiceImpl implements CartService {
             existing.get().setQuantity(requestedTotal);
         } else {
             CartItem item = new CartItem();
-            item.setId(perfume.getId());
             item.setPerfumeId(perfume.getId());
             item.setPerfumeName(perfume.getName());
             item.setImageUrl(perfume.getImageUrl());
@@ -62,8 +64,8 @@ public class CartServiceImpl implements CartService {
     @Override
     public CartResponse updateItem(String cartId, UpdateCartItemRequest request) {
         Cart cart = cartStore.getOrCreate(cartId);
-        CartItem item = findItem(cart, request.getCartItemId())
-                .orElseThrow(() -> new ResourceNotFoundException("Item not found in cart: " + request.getCartItemId()));
+        CartItem item = findItem(cart, request.getPerfumeId())
+                .orElseThrow(() -> new ResourceNotFoundException("Item not found in cart: " + request.getPerfumeId()));
 
         if (request.getQuantity() == null || request.getQuantity() <= 0) {
             cart.getItems().remove(item);
@@ -86,6 +88,11 @@ public class CartServiceImpl implements CartService {
         return cartMapper.toResponse(cart);
     }
 
+    // No hay pago online: "comprar" es armar un mensaje de WhatsApp con el pedido y redirigir
+    // ahi para que el cliente lo confirme con el negocio. Ya NO vaciamos el carrito aca: si
+    // el cliente no llega a abrir WhatsApp (no lo tiene instalado, sin conexion, etc.) no
+    // queremos que pierda el pedido armado. El front llama a clearCart() aparte, solo despues
+    // de confirmar que WhatsApp se abrio bien.
     @Override
     public WhatsAppRedirectResponse checkout(String cartId) {
         Cart cart = cartStore.getOrCreate(cartId);
@@ -94,9 +101,14 @@ public class CartServiceImpl implements CartService {
         }
 
         String message = whatsAppService.generateWhatsAppMessage(buildCartSummary(cart));
-        WhatsAppRedirectResponse redirect = whatsAppService.getWhatsAppRedirect(message);
+        return whatsAppService.getWhatsAppRedirect(message);
+    }
+
+    @Override
+    public CartResponse clearCart(String cartId) {
+        Cart cart = cartStore.getOrCreate(cartId);
         cart.getItems().clear();
-        return redirect;
+        return cartMapper.toResponse(cart);
     }
 
     private Perfume findPerfumeOrThrow(Long perfumeId) {

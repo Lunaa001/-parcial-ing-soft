@@ -23,7 +23,7 @@ public class CartStore {
     public Cart getOrCreate(String cartId) {
         return carts.computeIfAbsent(cartId, id -> {
             List<CartItem> items = new CopyOnWriteArrayList<>();
-            return new Cart(idSequence.getAndIncrement(), null, items, BigDecimal.ZERO);
+            return new Cart(idSequence.getAndIncrement(), items, BigDecimal.ZERO);
         });
     }
 }

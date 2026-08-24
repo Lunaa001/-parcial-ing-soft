@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+// Endpoint publico del chat conversacional con IA; toda la logica de recomendacion/prompt/
+// validacion de la respuesta vive en ChatServiceImpl, aca solo se expone.
 @RestController
 @RequestMapping("/api/chat")
 @RequiredArgsConstructor

@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
+// Traduce cada excepcion de negocio a un ErrorResponse con el HTTP status que le corresponde,
+// para que los controllers no tengan que armar esa respuesta a mano en cada catch.
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {

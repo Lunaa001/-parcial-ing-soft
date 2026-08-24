@@ -1,7 +1,6 @@
 package com.iaperfumeadvisor.service.impl;
 
 import com.iaperfumeadvisor.dto.request.auth.RegisterRequest;
-import com.iaperfumeadvisor.dto.response.UserResponse;
 import com.iaperfumeadvisor.entity.User;
 import com.iaperfumeadvisor.enums.Role;
 import com.iaperfumeadvisor.exception.InvalidInputException;
@@ -21,6 +20,8 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
 
+    // El auto-registro siempre crea cuentas CLIENT; no hay forma de registrarse como ADMIN por
+    // esta via (ver AdminUserInitializer para como se crea el admin).
     @Override
     public User createUser(RegisterRequest request) {
         if (userRepository.existsByUsername(request.getUsername())) {
@@ -41,17 +42,5 @@ public class UserServiceImpl implements UserService {
     public User getUserEntityByUsername(String username) {
         return userRepository.findByUsername(username)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
-    }
-
-    @Override
-    public UserResponse getUserByUsername(String username) {
-        return userMapper.toResponse(getUserEntityByUsername(username));
-    }
-
-    @Override
-    public UserResponse getUserById(Long id) {
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
-        return userMapper.toResponse(user);
     }
 }

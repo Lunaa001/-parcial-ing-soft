@@ -15,6 +15,9 @@ import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.stereotype.Service;
 
+// Orquesta login/registro: delega la verificacion de credenciales a Spring Security
+// (AuthenticationManager) y arma el AuthResponse con el JWT que el cliente va a mandar en las
+// siguientes requests.
 @Service
 @RequiredArgsConstructor
 public class AuthenticationServiceImpl implements AuthenticationService {
@@ -29,6 +32,8 @@ public class AuthenticationServiceImpl implements AuthenticationService {
         return buildAuthResponse(user);
     }
 
+    // Traducimos las excepciones propias de Spring Security a nuestra UnauthorizedException
+    // para que el cliente vea un error consistente con el resto de la API (ver GlobalExceptionHandler).
     @Override
     public AuthResponse login(LoginRequest request) {
         try {

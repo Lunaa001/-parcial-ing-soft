@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * Arma la instruccion de sistema para la IA (Groq). El mensaje actual del cliente y el
- * historial de la charla se mandan aparte, como turnos de conversacion (ver OpenAiService),
+ * historial de la charla se mandan aparte, como turnos de conversacion (ver GroqService),
  * asi que esto solo describe el rol, las reglas y (si corresponde) el catalogo a ofrecer.
  */
 @Component
@@ -53,6 +53,9 @@ public class PromptBuilder {
                     + "comprarlo o reservarlo, NO le pidas cantidad, dirección ni forma de pago: solo decile con "
                     + "naturalidad que lo agregue al carrito con el botón de la tarjeta para completar la compra ahí.\n\n";
 
+    // Elige que "personalidad"/instruccion de sistema usar segun el resultado de
+    // RecommendationService: charla general, pedir una pista, avisar que no hay coincidencias, o
+    // recomendar los productos concretos que se encontraron.
     public String buildChatPrompt(RecommendationResponse recommendations) {
         if (!recommendations.isProductIntent()) {
             return buildSmallTalkPrompt();

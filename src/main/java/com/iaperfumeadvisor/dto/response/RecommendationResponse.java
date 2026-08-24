@@ -7,6 +7,9 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
+// Version publica/API de PreferenceCriteria + los matches ya resueltos: PromptBuilder y el
+// frontend usan productIntent/needsClarification para decidir si mostrar productos, pedir mas
+// info, o responder charla general.
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
