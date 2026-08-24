@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 
+// Se dispara cuando el usuario esta autenticado pero no tiene el rol necesario (403), a
+// diferencia de JwtAuthenticationEntryPoint que es para cuando ni siquiera hay login valido (401).
 @Component
 @RequiredArgsConstructor
 public class JwtAccessDeniedHandler implements AccessDeniedHandler {

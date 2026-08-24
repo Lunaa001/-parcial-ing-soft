@@ -17,6 +17,8 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.stream.Collectors;
 
+// CRUD del catalogo para el admin y las consultas publicas por categoria/genero/disponibilidad
+// que usa la tienda; toda la conversion entidad <-> DTO se delega a PerfumeMapper.
 @Service
 @RequiredArgsConstructor
 public class PerfumeServiceImpl implements PerfumeService {

@@ -9,6 +9,8 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
+// Puente entre nuestra entidad User y el UserDetails que espera Spring Security (login y
+// autorizacion por rol via AuthenticationManager/JwtAuthenticationFilter).
 @Service
 @RequiredArgsConstructor
 public class CustomUserDetailsService implements UserDetailsService {
@@ -23,6 +25,8 @@ public class CustomUserDetailsService implements UserDetailsService {
         return org.springframework.security.core.userdetails.User.builder()
                 .username(user.getUsername())
                 .password(user.getPassword())
+                // El prefijo "ROLE_" es una convencion que exige Spring Security para que
+                // hasRole("ADMIN") (sin el prefijo) matchee esta autoridad.
                 .authorities(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()))
                 .disabled(!user.isEnabled())
                 .build();

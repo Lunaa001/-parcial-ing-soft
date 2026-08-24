@@ -10,6 +10,8 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
+// Crea el usuario ADMIN por defecto al arrancar, si todavia no existe: es la unica forma de
+// tener un admin, ya que el registro publico (UserServiceImpl.createUser) siempre da rol CLIENT.
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -27,6 +29,8 @@ public class AdminUserInitializer implements CommandLineRunner {
     @Value("${admin.default.email:admin@iaperfumeadvisor.com}")
     private String defaultEmail;
 
+    // Si no se configuro una password, preferimos no crear el admin (con password vacia/adivinable)
+    // antes que dejar una cuenta insegura dando vueltas.
     @Override
     public void run(String... args) {
         if (defaultPassword == null || defaultPassword.isBlank()) {

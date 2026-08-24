@@ -7,6 +7,8 @@ import com.iaperfumeadvisor.dto.response.RecommendationItem;
 import com.iaperfumeadvisor.entity.Perfume;
 import org.springframework.stereotype.Component;
 
+// Convierte entre la entidad Perfume y los distintos DTOs que la usan (alta/edicion de admin,
+// respuesta de catalogo, item de recomendacion), para que la entidad JPA nunca se exponga directo.
 @Component
 public class PerfumeMapper {
 

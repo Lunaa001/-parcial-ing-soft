@@ -7,6 +7,10 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.stream.Collectors;
 
+// Respuesta de reserva cuando no se puede confiar en el texto de la IA (fallo la llamada a
+// Groq, o el modelo alucino un producto/marca que no le dimos): ver ChatServiceImpl. Es texto
+// fijo y simple, sin IA de por medio, para garantizar que el cliente siempre reciba algo fiel
+// al catalogo real aunque el modelo falle o se equivoque.
 @Component
 public class ResponseGenerator {
 

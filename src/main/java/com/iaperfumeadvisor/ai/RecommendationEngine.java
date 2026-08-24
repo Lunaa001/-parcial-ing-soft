@@ -15,6 +15,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+// Segundo paso del pipeline: toma los criterios de PreferenceAnalyzer y los cruza contra el
+// catalogo real (stock disponible) para decidir que productos concretos ofrecer, con un
+// puntaje de afinidad. Es puramente algoritmico (sin IA); el texto final para el cliente lo
+// arma despues PromptBuilder/GroqService a partir de estos matches.
 @Component
 @RequiredArgsConstructor
 public class RecommendationEngine {
@@ -59,19 +63,6 @@ public class RecommendationEngine {
             return false;
         }
         if (criteria.getGenderType() != null && !matchesGender(perfume.getGenderType(), criteria.getGenderType())) {
-            return false;
-        }
-        if (criteria.getBrand() != null && !perfume.getBrand().equalsIgnoreCase(criteria.getBrand())) {
-            return false;
-        }
-        if (criteria.getMinPrice() != null && perfume.getPrice().compareTo(criteria.getMinPrice()) < 0) {
-            return false;
-        }
-        if (criteria.getMaxPrice() != null && perfume.getPrice().compareTo(criteria.getMaxPrice()) > 0) {
-            return false;
-        }
-        if (criteria.getMinRating() != null
-                && (perfume.getRating() == null || perfume.getRating() < criteria.getMinRating())) {
             return false;
         }
         return true;

@@ -16,4 +16,8 @@ public interface CartService {
     CartResponse removeItem(String cartId, Long perfumeId);
 
     WhatsAppRedirectResponse checkout(String cartId);
+
+    // Se llama por separado, solo despues de que el cliente confirma que WhatsApp se abrio
+    // bien (ver CartServiceImpl.checkout): asi si falla la apertura no se pierde el carrito.
+    CartResponse clearCart(String cartId);
 }

@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+// Expone el motor de recomendaciones "puro" (sin redaccion de IA) por si el frontend necesita
+// los matches crudos; el chat conversacional (ChatController) lo usa por dentro, no via HTTP.
 @RestController
 @RequestMapping("/api/recommendations")
 @RequiredArgsConstructor

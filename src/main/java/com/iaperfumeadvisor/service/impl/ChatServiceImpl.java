@@ -10,7 +10,7 @@ import com.iaperfumeadvisor.dto.response.RecommendationItem;
 import com.iaperfumeadvisor.dto.response.RecommendationResponse;
 import com.iaperfumeadvisor.exception.BusinessException;
 import com.iaperfumeadvisor.service.ChatService;
-import com.iaperfumeadvisor.service.OpenAiService;
+import com.iaperfumeadvisor.service.GroqService;
 import com.iaperfumeadvisor.service.RecommendationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +23,9 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+// Orquesta el chat conversacional: arma los criterios/recomendaciones (via RecommendationService),
+// arma el prompt de sistema (PromptBuilder), llama a la IA (GroqService) y valida que la respuesta
+// no se salga de guion (alucinaciones de productos o marcas) antes de devolverla al cliente.
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -33,7 +36,7 @@ public class ChatServiceImpl implements ChatService {
 
     private final RecommendationService recommendationService;
     private final PromptBuilder promptBuilder;
-    private final OpenAiService openAiService;
+    private final GroqService groqService;
     private final ResponseGenerator responseGenerator;
 
     // Cuantos mensajes previos del cliente sumamos para reintentar el analisis cuando el mensaje
@@ -45,6 +48,9 @@ public class ChatServiceImpl implements ChatService {
     // Marcas de otros negocios que la IA podria conocer y mencionar de memoria/busqueda para
     // "explicar" nuestros productos, aunque el cliente no las haya pedido. Si aparecen sin que el
     // cliente las haya nombrado el mismo, lo tratamos como una recomendacion no autorizada.
+    // OJO: esto es una lista fija a mano, no una deteccion real de marcas: cualquier marca que no
+    // este ac se cuela sin que esta proteccion la detecte. Sirve como salvavidas adicional, no
+    // como garantia total (la instruccion en KNOWLEDGE_NOTE/RESEARCH_NOTE es la primera barrera).
     private static final Set<String> KNOWN_OTHER_BRANDS = Set.of(
             "dior", "sauvage", "chanel", "tom ford", "tobacco vanille", "creed", "aventus",
             "ysl", "yves saint laurent", "libre", "armani", "giorgio armani",
@@ -55,7 +61,14 @@ public class ChatServiceImpl implements ChatService {
             "althair", "xerjoff", "amouage", "initio", "jean paul gaultier", "issey miyake",
             "azzaro", "viktor & rolf", "narciso rodriguez", "elie saab", "lancome", "givenchy",
             "montale", "mancera", "nishane", "byredo", "good girl", "la vie est belle",
-            "black opium", "club de nuit"
+            "black opium", "club de nuit",
+            // Marcas arabes que tambien son competencia directa (no las vendemos nosotros).
+            "al haramain", "rasasi", "swiss arabian", "afnan", "armaf", "ajmal", "arabiyat",
+            "my perfumes", "ard al zaafaran",
+            // Otras marcas de diseñador/nicho comunes.
+            "ralph lauren", "tommy hilfiger", "diesel", "moschino", "marc jacobs", "kenzo",
+            "loewe", "bottega veneta", "ferrari", "lacoste", "zara", "hermes", "hermès",
+            "jo malone", "le labo", "acqua di parma", "estee lauder", "clinique", "fenty"
     );
 
     @Override
@@ -88,7 +101,7 @@ public class ChatServiceImpl implements ChatService {
 
         String naturalResponse;
         try {
-            naturalResponse = openAiService.generateChatResponse(systemInstruction, history, request.getMessage(), allowSearch);
+            naturalResponse = groqService.generateChatResponse(systemInstruction, history, request.getMessage(), allowSearch);
             List<RecommendationItem> items = recommendations.getRecommendations();
             if (items != null && !items.isEmpty() && mentionsProductNotInCatalog(naturalResponse, recommendations)) {
                 log.warn("La IA menciono productos fuera del catalogo dado, se usa respuesta de reserva");

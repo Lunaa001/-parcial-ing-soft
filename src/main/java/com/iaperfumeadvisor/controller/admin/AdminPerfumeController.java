@@ -21,6 +21,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+// Gestion del catalogo reservada al rol ADMIN (ver SecurityConfig): alta, edicion, borrado y
+// carga de fotos de producto. La consulta publica del catalogo vive aparte, en PerfumeController.
 @RestController
 @RequestMapping("/api/admin/perfumes")
 @RequiredArgsConstructor

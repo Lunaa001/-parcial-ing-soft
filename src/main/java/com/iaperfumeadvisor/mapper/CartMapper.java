@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.stream.Collectors;
 
+// Traduce el carrito interno (Cart/CartItem, en memoria) al DTO que ve el cliente por API.
 @Component
 public class CartMapper {
 

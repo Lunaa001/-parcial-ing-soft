@@ -12,6 +12,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+// Primer paso del pipeline de recomendaciones: convierte el texto libre del cliente en
+// criterios estructurados (categoria, genero, intencion de compra) a puro matcheo de palabras
+// clave, sin llamar a ningun modelo de IA. RecommendationEngine usa estos criterios para filtrar
+// el catalogo antes de que la IA entre a redactar la respuesta.
 @Component
 public class PreferenceAnalyzer {
 
@@ -84,6 +88,8 @@ public class PreferenceAnalyzer {
         return Optional.ofNullable(CATEGORY_KEYWORDS.get(token));
     }
 
+    // Punto de entrada del analisis: tokeniza el mensaje y lo cruza contra los diccionarios de
+    // palabras clave de arriba para armar los criterios que despues usa RecommendationEngine.
     public PreferenceCriteria analyze(String message) {
         List<String> tokens = tokenize(message);
 

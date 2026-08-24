@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+// Login/registro; unico punto que emite JWT (ver JwtService). El registro siempre crea cuentas
+// CLIENT (el admin se crea aparte, ver AdminUserInitializer).
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor

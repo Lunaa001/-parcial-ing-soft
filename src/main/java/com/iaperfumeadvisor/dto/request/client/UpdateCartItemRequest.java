@@ -12,8 +12,8 @@ import lombok.NoArgsConstructor;
 @Builder
 public class UpdateCartItemRequest {
 
-    @NotNull(message = "Cart item id is required")
-    private Long cartItemId;
+    @NotNull(message = "Perfume id is required")
+    private Long perfumeId;
 
     // Null o <= 0 quita el item del carrito.
     private Integer quantity;

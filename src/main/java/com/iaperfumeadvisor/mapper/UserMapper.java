@@ -1,10 +1,11 @@
 package com.iaperfumeadvisor.mapper;
 
 import com.iaperfumeadvisor.dto.request.auth.RegisterRequest;
-import com.iaperfumeadvisor.dto.response.UserResponse;
 import com.iaperfumeadvisor.entity.User;
 import org.springframework.stereotype.Component;
 
+// Arma la entidad User a partir del registro; la contraseña llega en texto plano aca y se
+// encripta despues en UserServiceImpl.createUser antes de guardar.
 @Component
 public class UserMapper {
 
@@ -15,17 +16,5 @@ public class UserMapper {
         user.setFullName(request.getFullName());
         user.setEmail(request.getEmail());
         return user;
-    }
-
-    public UserResponse toResponse(User user) {
-        return UserResponse.builder()
-                .id(user.getId())
-                .username(user.getUsername())
-                .fullName(user.getFullName())
-                .email(user.getEmail())
-                .role(user.getRole().name())
-                .enabled(user.isEnabled())
-                .createdAt(user.getCreatedAt())
-                .build();
     }
 }

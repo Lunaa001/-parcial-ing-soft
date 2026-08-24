@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 
+// Se dispara cuando falta autenticacion valida (401): ver JwtAccessDeniedHandler para el caso
+// de rol insuficiente (403).
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
@@ -19,6 +21,9 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response,
                           AuthenticationException authException) throws IOException {
+        // JwtAuthenticationFilter guarda aca el motivo especifico (token vencido/invalido/usuario
+        // inexistente) antes de dejar pasar el request sin autenticar; si no esta seteado es que
+        // directamente no vino ningun token.
         Object attribute = request.getAttribute(JwtAuthenticationFilter.JWT_ERROR_ATTRIBUTE);
         String message = attribute != null ? attribute.toString() : "Authentication is required to access this resource";
         responseWriter.write(response, HttpStatus.UNAUTHORIZED, message);

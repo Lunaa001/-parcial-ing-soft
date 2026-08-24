@@ -7,9 +7,11 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.math.BigDecimal;
 import java.util.List;
 
+// Resultado de PreferenceAnalyzer: lo que se pudo inferir del mensaje del cliente antes de
+// tocar el catalogo o la IA. RecommendationEngine consume esto para decidir que perfumes
+// mostrar (o si corresponde pedir mas info en vez de recomendar al voleo).
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -17,10 +19,6 @@ import java.util.List;
 public class PreferenceCriteria {
     private PerfumeCategory category;
     private GenderType genderType;
-    private String brand;
-    private BigDecimal minPrice;
-    private BigDecimal maxPrice;
-    private Integer minRating;
     private List<String> keywords;
     // Si el mensaje realmente pide perfumes/recomendaciones (vs. saludos, agradecimientos, charla general).
     private boolean productIntent;

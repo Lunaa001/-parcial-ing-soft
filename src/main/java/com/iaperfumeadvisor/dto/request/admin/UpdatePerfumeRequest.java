@@ -11,6 +11,8 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.util.List;
 
+// A diferencia de CreatePerfumeRequest, todos los campos son opcionales a proposito: es una
+// actualizacion parcial, PerfumeMapper solo pisa en la entidad los campos que vengan no-nulos.
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

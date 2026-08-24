@@ -11,6 +11,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
+// Cuenta autenticable del sistema (admin o cliente); Spring Security la usa via
+// CustomUserDetailsService para login y autorizacion por rol.
 @Entity
 @Table(name = "users")
 @Data
