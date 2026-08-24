@@ -24,4 +24,9 @@ public class PreferenceCriteria {
     private List<String> keywords;
     // Si el mensaje realmente pide perfumes/recomendaciones (vs. saludos, agradecimientos, charla general).
     private boolean productIntent;
+    // Si pidio perfumes pero sin ninguna pista concreta: conviene preguntar antes de recomendar.
+    private boolean needsClarification;
+    // Si pregunto por un perfume puntual (el nuestro o "algo parecido/inspirado en" otro):
+    // ahi alcanza con el mejor match, no con una lista de opciones.
+    private boolean referencesSpecificPerfume;
 }

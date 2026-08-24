@@ -7,10 +7,11 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * La primera llamada a Gemini despues de arrancar el server tarda bastante mas
+ * La primera llamada a Groq despues de arrancar el server tarda bastante mas
  * (conexion TLS nueva, etc.) que las siguientes. Disparamos una llamada minima
  * apenas termina de levantar la app para que esa demora no la pague el primer
  * cliente real que escribe.
@@ -18,7 +19,7 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class GeminiWarmupInitializer {
+public class GroqWarmupInitializer {
 
     private final OpenAiService openAiService;
 
@@ -27,10 +28,10 @@ public class GeminiWarmupInitializer {
         CompletableFuture.runAsync(() -> {
             try {
                 long start = System.currentTimeMillis();
-                openAiService.generateChatResponse("Responde unicamente con: ok");
-                log.info("Gemini precalentado en {} ms", System.currentTimeMillis() - start);
+                openAiService.generateChatResponse("Responde unicamente con: ok", List.of(), "hola", true);
+                log.info("Groq precalentado en {} ms", System.currentTimeMillis() - start);
             } catch (Exception ex) {
-                log.warn("No se pudo precalentar Gemini: {}", ex.getMessage());
+                log.warn("No se pudo precalentar Groq: {}", ex.getMessage());
             }
         });
     }

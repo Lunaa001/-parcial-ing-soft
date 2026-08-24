@@ -7,6 +7,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -16,4 +18,7 @@ public class ChatRequest {
     @NotBlank(message = "El mensaje es obligatorio")
     @Size(max = 500, message = "El mensaje no puede superar los 500 caracteres")
     private String message;
+
+    // Turnos anteriores de la charla (sin incluir "message"), para que la IA tenga contexto.
+    private List<ChatHistoryItem> history;
 }

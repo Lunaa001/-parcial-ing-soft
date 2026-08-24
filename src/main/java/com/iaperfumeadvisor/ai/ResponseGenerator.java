@@ -15,9 +15,14 @@ public class ResponseGenerator {
             return "Hola! Contame que tipo de perfume estas buscando y te ayudo a encontrar algo.";
         }
 
+        if (recommendations.isNeedsClarification()) {
+            return "Contame un poco mas: es para vos o para regalar? te gusta algo mas dulce, fresco o amaderado?";
+        }
+
         List<RecommendationItem> items = recommendations.getRecommendations();
         if (items.isEmpty()) {
-            return "No encontre perfumes disponibles que coincidan con tu busqueda en este momento.";
+            return "Por ahora no tenemos coincidencias en nuestro catalogo para esa busqueda. "
+                    + "Contame si queres que te muestre otras opciones.";
         }
 
         String names = items.stream()

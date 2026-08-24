@@ -15,6 +15,7 @@ public class RecommendationResponse {
     private String detectedCategory;
     private String detectedGender;
     private boolean productIntent;
+    private boolean needsClarification;
     private int totalMatches;
     private List<RecommendationItem> recommendations;
 }

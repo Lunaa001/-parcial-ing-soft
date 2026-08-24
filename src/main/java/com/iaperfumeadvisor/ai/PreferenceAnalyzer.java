@@ -9,6 +9,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 @Component
@@ -61,6 +62,28 @@ public class PreferenceAnalyzer {
             "similar", "similares", "parecido", "parecidos", "parecida", "parecidas", "uso", "usaba"
     );
 
+    // Si el cliente usa alguna de estas, esta preguntando por UN perfume puntual (el propio o
+    // uno de otra marca que quiere que le busquemos parecido), no pidiendo opciones en general:
+    // en ese caso alcanza con mostrarle el mejor match, no una lista de 3.
+    private static final Set<String> REFERENCE_KEYWORDS = Set.of(
+            "parecido", "parecida", "parecidos", "parecidas", "parece", "parecen", "similar", "similares",
+            "inspiracion", "inspiraciones", "inspirado", "inspirada", "alternativa", "alternativas", "dupe", "dupes"
+    );
+
+    // Palabras muy comunes que no aportan ninguna pista real sobre lo que busca el cliente.
+    private static final Set<String> STOPWORDS = Set.of(
+            "un", "una", "unos", "unas", "el", "la", "los", "las", "de", "del", "para", "por",
+            "que", "es", "como", "con", "me", "te", "se", "lo", "mi", "tu", "su", "y", "o",
+            "algo", "alguna", "alguno", "hola", "buenas", "porfa", "porfavor", "gracias"
+    );
+
+    // Usado por RecommendationEngine para comparar la categoria que pidio el cliente contra las
+    // categorias en texto libre que carga el admin (ej: "Dulce", "Especiado"), mapeando ambas al
+    // mismo enum en vez de comparar las palabras exactas (que no siempre coinciden en genero/numero).
+    public static Optional<PerfumeCategory> mapKeywordToCategory(String token) {
+        return Optional.ofNullable(CATEGORY_KEYWORDS.get(token));
+    }
+
     public PreferenceCriteria analyze(String message) {
         List<String> tokens = tokenize(message);
 
@@ -80,11 +103,30 @@ public class PreferenceAnalyzer {
                 || genderType != null
                 || tokens.stream().anyMatch(INTENT_KEYWORDS::contains);
 
+        // Si pidio perfumes pero no dio ninguna pista concreta (ni categoria, ni genero, ni
+        // ninguna palabra "extra" mas alla del pedido generico), es mejor preguntarle algo
+        // simple antes de recomendar cualquier cosa al voleo.
+        boolean hasExtraSignal = tokens.stream().anyMatch(token ->
+                token.length() > 2
+                        && !INTENT_KEYWORDS.contains(token)
+                        && !STOPWORDS.contains(token)
+                        && !CATEGORY_KEYWORDS.containsKey(token)
+                        && !GENDER_KEYWORDS.containsKey(token));
+
+        boolean needsClarification = productIntent
+                && category == null
+                && genderType == null
+                && !hasExtraSignal;
+
+        boolean referencesSpecificPerfume = tokens.stream().anyMatch(REFERENCE_KEYWORDS::contains);
+
         return PreferenceCriteria.builder()
                 .category(category)
                 .genderType(genderType)
                 .keywords(tokens)
                 .productIntent(productIntent)
+                .needsClarification(needsClarification)
+                .referencesSpecificPerfume(referencesSpecificPerfume)
                 .build();
     }
 
