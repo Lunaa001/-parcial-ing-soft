@@ -31,10 +31,17 @@ public class RecommendationServiceImpl implements RecommendationService {
                 .map(match -> perfumeMapper.toRecommendationItem(match.perfume(), match.score()))
                 .toList();
 
+        // Si el motor encontro productos concretos (por ejemplo, el cliente escribio el nombre
+        // exacto de uno nuestro) tratamos el mensaje como intencion de compra real, sin importar
+        // lo que haya detectado el analisis de palabras clave por si solo.
+        boolean productIntent = criteria.isProductIntent() || !items.isEmpty();
+        boolean needsClarification = criteria.isNeedsClarification() && items.isEmpty();
+
         return RecommendationResponse.builder()
                 .detectedCategory(criteria.getCategory() != null ? criteria.getCategory().name() : null)
                 .detectedGender(criteria.getGenderType() != null ? criteria.getGenderType().name() : null)
-                .productIntent(criteria.isProductIntent())
+                .productIntent(productIntent)
+                .needsClarification(needsClarification)
                 .totalMatches(items.size())
                 .recommendations(items)
                 .build();
