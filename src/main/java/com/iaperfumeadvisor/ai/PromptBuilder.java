@@ -126,7 +126,11 @@ public class PromptBuilder {
                 .append("en charlar y ayudar a elegir.\n")
                 .append("- Te paso solo los que mejor encajan (puede ser uno solo o varios), no el catálogo entero. Si te ")
                 .append("parece útil, cerrá tu respuesta con una pregunta corta para afinar más la búsqueda (por ejemplo, ")
-                .append("si busca algo más económico, de otra intensidad, o si le interesa), pero sin sonar a formulario.\n\n")
+                .append("si busca algo más económico, de otra intensidad, o si le interesa), pero sin sonar a formulario.\n")
+                .append("- Si te paso MÁS DE UNO, mencioná a TODOS por su nombre (aunque sea una linea corta cada uno): ")
+                .append("las tarjetas de todos se muestran igual, asi que si tu texto solo habla de uno el cliente no va a ")
+                .append("entender por que aparecen los demas. No hace falta la misma extension para cada uno, pero todos ")
+                .append("tienen que quedar nombrados.\n\n")
                 .append("Perfumes que podés ofrecer ahora (usa solo estos):\n");
 
         for (RecommendationItem item : items) {

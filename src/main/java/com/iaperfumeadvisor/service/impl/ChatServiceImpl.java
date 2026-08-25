@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -122,9 +123,27 @@ public class ChatServiceImpl implements ChatService {
                 .id(UUID.randomUUID().toString())
                 .message(request.getMessage())
                 .response(naturalResponse)
-                .recommendations(recommendations.getRecommendations())
+                .recommendations(reorderByMention(recommendations.getRecommendations(), naturalResponse))
                 .timestamp(LocalDateTime.now())
                 .build();
+    }
+
+    // Cuando le pasamos varios productos (pedido general, ej: "quiero algo con vainilla"), la IA
+    // a veces solo describe UNO en el texto y no menciona a los otros: si dejamos las tarjetas en
+    // el orden del puntaje interno, el que sí nombro puede terminar al final, lo cual es confuso
+    // (el cliente lee sobre un perfume y ve otro arriba). Reordenamos las tarjetas para que el que
+    // aparece primero en el texto quede primero, y el resto mantenga su orden original despues.
+    private List<RecommendationItem> reorderByMention(List<RecommendationItem> items, String naturalResponse) {
+        if (items == null || items.size() < 2 || naturalResponse == null) {
+            return items;
+        }
+        String lowerResponse = naturalResponse.toLowerCase();
+        return items.stream()
+                .sorted(Comparator.comparingInt(item -> {
+                    int index = lowerResponse.indexOf(item.getName().toLowerCase());
+                    return index < 0 ? Integer.MAX_VALUE : index;
+                }))
+                .toList();
     }
 
     // Salvavidas ante alucinaciones: si le dimos productos concretos para ofrecer pero la
