@@ -87,7 +87,13 @@ public class RecommendationEngine {
         return false;
     }
 
+    // Pedir "unisex" es pedir que el genero no importe, no que el producto este tageado UNISEX a
+    // la fuerza: si filtraramos estricto, un MALE que encaja perfecto quedaria afuera solo porque
+    // el cliente (o la IA infiriendo el genero de un perfume de otra marca) dijo "unisex".
     private boolean matchesGender(GenderType perfumeGender, GenderType requestedGender) {
+        if (requestedGender == GenderType.UNISEX) {
+            return true;
+        }
         return perfumeGender == requestedGender || perfumeGender == GenderType.UNISEX;
     }
 
