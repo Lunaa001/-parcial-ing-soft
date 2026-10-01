@@ -3,11 +3,8 @@ package com.iaperfumeadvisor.service.impl;
 import com.iaperfumeadvisor.exception.BusinessException;
 import com.iaperfumeadvisor.exception.InvalidInputException;
 import com.iaperfumeadvisor.service.ImageStorageService;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -51,7 +48,11 @@ public class ImageStorageServiceImpl implements ImageStorageService {
                 Files.copy(inputStream, destination);
             }
 
-            return buildPublicUrl("/uploads/perfumes/" + filename);
+            // Ruta relativa, no URL absoluta: si guardaramos el host de este request (ej. la IP
+            // de red que tenia la compu en ese momento), la foto quedaria rota apenas cambie de
+            // red. El frontend arma la URL completa con el host que este usando en cada momento
+            // (ver resolveImageUrl en lib/api.ts).
+            return "/uploads/perfumes/" + filename;
         } catch (IOException ex) {
             throw new BusinessException("No se pudo guardar la imagen", ex);
         }
@@ -64,16 +65,5 @@ public class ImageStorageServiceImpl implements ImageStorageService {
             case "image/gif" -> ".gif";
             default -> ".jpg";
         };
-    }
-
-    // Arma la URL absoluta usando el host con el que el cliente nos contacto (localhost,
-    // IP de la red local, etc.), para que la foto se pueda ver desde cualquier dispositivo.
-    private String buildPublicUrl(String relativePath) {
-        ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-        if (attrs == null) {
-            return relativePath;
-        }
-        HttpServletRequest request = attrs.getRequest();
-        return request.getScheme() + "://" + request.getServerName() + ":" + request.getServerPort() + relativePath;
     }
 }
