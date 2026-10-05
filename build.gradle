@@ -23,6 +23,9 @@ dependencies {
 	// WEB
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 
+	// ACTUATOR (health check para el despliegue y metricas de memoria/CPU)
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
 	// JPA (BASE DE DATOS)
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 
