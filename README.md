@@ -1,3 +1,5 @@
+> Despliegue (Docker, Azure Container Apps y CI/CD): ver [DEPLOY.md](DEPLOY.md).
+
 # AI Perfume Advisor
 
 Sistema inteligente de recomendación de perfumes que funciona como un asistente virtual de ventas. Permite interpretar las preferencias del usuario mediante lenguaje natural y sugerir productos personalizados disponibles en el sistema.

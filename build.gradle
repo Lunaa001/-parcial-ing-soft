@@ -38,6 +38,9 @@ dependencies {
 	// POSTGRESQL
 	implementation 'org.postgresql:postgresql'
 
+	// H2 (base en memoria para el perfil cloud del despliegue)
+	runtimeOnly 'com.h2database:h2'
+
 	// FLYWAY (MIGRACIONES) - Spring Boot 4 modulariza la autoconfiguracion en su propio starter
 	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.flywaydb:flyway-database-postgresql'
