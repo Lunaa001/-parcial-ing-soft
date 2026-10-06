@@ -44,8 +44,8 @@ Se cargan en **Settings → Secrets and variables → Actions → New repository
 | `CONTAINER_APP_NAME` | nombre de la Container App | `perfume-api` |
 | `RESOURCE_GROUP` | grupo de recursos | `rg-perfume` |
 
-> `ACR_USERNAME` y `ACR_PASSWORD` ya no se usan (el login al ACR se hace con el service principal).
-> Se borran de GitHub después del primer run en verde del pipeline nuevo.
+> No hacen falta `ACR_USERNAME` ni `ACR_PASSWORD`: el login al ACR se hace con el service principal.
+> Se usaban en una versión anterior del pipeline y se borraron de GitHub.
 
 ### Crear el service principal (`AZURE_CREDENTIALS`)
 
@@ -270,6 +270,9 @@ dejan, podrían quedar fijadas versiones más viejas que las que traería el Spr
 - `az acr build` no funciona en `chilecentral`: la imagen se construye en GitHub Actions y se sube con Docker.
 - Health check en producción: `https://<fqdn>/actuator/health` responde `UP`. Justo después de
   actualizar la imagen puede responder 503 mientras arranca la revisión nueva; luego vuelve a 200.
+- Pipeline completo en verde (run 37527971295, commit `471292b`): Trivy 0 vulnerabilidades HIGH/CRITICAL
+  en la base Distroless y en `app.jar`; la revisión activa quedó con la imagen
+  `parcial-ing-soft:471292bb…`, `Healthy`, y `/actuator/health` responde `UP`.
 - Spring Boot 4.0.5 tenía 58 dependencias vulnerables (Spring, Tomcat y Spring Security) según
   Dependency-Check; se subió a Spring Boot 4.1.1 y se migró a Jackson 3.
 
