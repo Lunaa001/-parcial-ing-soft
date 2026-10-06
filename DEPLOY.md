@@ -105,7 +105,12 @@ nuevo repo y en la nueva Container App, como en los pasos 5 y 6.
 - Entorno Container Apps **Express**: no admite identidad administrada ni sufijos de revisión.
   El registry usa usuario administrador (credenciales guardadas como secretos).
 - `az acr build` no funciona en `chilecentral`: la imagen se construye en GitHub Actions y se sube con Docker.
-- Health check en producción: `https://<fqdn>/actuator/health` responde `UP`.
+- Health check en producción: `https://<fqdn>/actuator/health` responde `UP`. Justo después de
+  actualizar la imagen puede responder 503 mientras arranca la revisión nueva; luego vuelve a 200.
+- Versión desplegada: `parcial-ing-soft:v3` (Spring Boot 4.1.1, Jackson 3). `/actuator/metrics`
+  responde 401 sin login.
+- Control de ciclo de vida: `--min-replicas 0` pide escalar a cero, pero Azure tarda en bajar la
+  réplica; `--min-replicas 1` la vuelve a levantar y el health responde 200.
 
 ## Limitaciones
 
@@ -114,7 +119,10 @@ nuevo repo y en la nueva Container App, como en los pasos 5 y 6.
   `AZURE_CREDENTIALS` que hay que crear desde una cuenta con permisos de administrador de Entra ID.
   Mientras tanto, la imagen se publica sola en el registry y la Container App se actualiza a mano con
   `az containerapp update --image <registry>/parcial-ing-soft:<tag>`.
-- **Auditoria de CVEs**: `./gradlew dependencyCheckAnalyze` falla sin API key de NVD. Requiere una
-  API key gratuita de NVD (nvd.nist.gov) cargada en la propiedad `nvdApiKey` o en la variable de entorno
-  `NVD_API_KEY`.
+- **Auditoria de CVEs**: `./gradlew dependencyCheckAnalyze` necesita una API key de NVD (nvd.nist.gov),
+  cargada solo en la variable de entorno `NVD_API_KEY` (nunca en un archivo). El analizador OSS Index
+  está desactivado porque exige credenciales. Con Spring Boot 4.0.5 la auditoría encontró 58 dependencias
+  vulnerables (Spring, Tomcat y Spring Security); se subió a Spring Boot 4.1.1 y se migró a Jackson 3.
+  La auditoría completa sobre 4.1.1 queda pendiente: su resultado está en
+  `build/reports/dependency-check-report.html` al correrla.
 - **Base de datos y archivos**: H2 en memoria y `/tmp/uploads`, ambos efimeros.
