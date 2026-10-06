@@ -1,4 +1,4 @@
-name: CI/CD - construir y publicar la imagen
+name: CI/CD - construir, escanear y desplegar en Azure Container Apps
 
 on:
   push:
@@ -8,39 +8,97 @@ on:
 permissions:
   contents: read
 
+# Dos pushes seguidos no despliegan a la vez: el segundo espera al primero
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
 env:
   IMAGE_NAME: parcial-ing-soft
 
 jobs:
-  build-and-push:
+  build-scan-deploy:
     runs-on: ubuntu-latest
+    env:
+      ACR_NAME: ${{ secrets.ACR_NAME }}
+      CONTAINER_APP_NAME: ${{ secrets.CONTAINER_APP_NAME }}
+      RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Verificar que existen los secretos necesarios
+        env:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        run: |
+          faltan=0
+          for nombre in AZURE_CREDENTIALS ACR_NAME CONTAINER_APP_NAME RESOURCE_GROUP; do
+            if [ -z "${!nombre}" ]; then
+              echo "::error::Falta el secreto de GitHub '$nombre'. Ver DEPLOY.md, seccion 'Secretos de GitHub'."
+              faltan=1
+            fi
+          done
+          if [[ "$ACR_NAME" == *.azurecr.io* || "$ACR_NAME" =~ [^a-z0-9] ]]; then
+            echo "::error::ACR_NAME tiene que ser solo el nombre del registry (minusculas y numeros, sin '.azurecr.io')."
+            faltan=1
+          fi
+          exit $faltan
 
-      - name: Login en Azure Container Registry
-        run: echo "${{ secrets.ACR_PASSWORD }}" | docker login "${{ secrets.ACR_NAME }}.azurecr.io" -u "${{ secrets.ACR_USERNAME }}" --password-stdin
+      - uses: actions/checkout@v5
+
+      - name: Login en Azure (service principal)
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login en Azure Container Registry (con el service principal)
+        run: az acr login --name "$ACR_NAME"
 
       - name: Construir la imagen (Distroless, multi-stage)
-        run: docker build -t "${{ secrets.ACR_NAME }}.azurecr.io/${IMAGE_NAME}:${{ github.sha }}" -t "${{ secrets.ACR_NAME }}.azurecr.io/${IMAGE_NAME}:latest" .
+        run: |
+          IMAGE="$ACR_NAME.azurecr.io/$IMAGE_NAME"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+
+      # Antes del push: una imagen con CVEs HIGH/CRITICAL que tengan parche no llega al registry.
+      # Fijada por commit (v0.36.0), no por tag, para que nadie pueda cambiar el codigo que corre.
+      - name: Escanear la imagen con Trivy (CVEs HIGH/CRITICAL con parche)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: '1'
 
       - name: Subir la imagen al registry
         run: |
-          docker push "${{ secrets.ACR_NAME }}.azurecr.io/${IMAGE_NAME}:${{ github.sha }}"
-          docker push "${{ secrets.ACR_NAME }}.azurecr.io/${IMAGE_NAME}:latest"
-
-  deploy:
-    # Requiere AZURE_CREDENTIALS (service principal). Ver DEPLOY.md, seccion "Limitaciones".
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Login en Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
 
       - name: Actualizar la Container App a la imagen nueva
         run: |
           az containerapp update \
-            --name "${{ secrets.CONTAINER_APP_NAME }}" \
-            --resource-group "${{ secrets.RESOURCE_GROUP }}" \
-            --image "${{ secrets.ACR_NAME }}.azurecr.io/${IMAGE_NAME}:${{ github.sha }}"
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$IMAGE:${{ github.sha }}" \
+            --output none
+
+      # Justo despues del update la revision nueva puede responder 503 mientras arranca. Ademas se
+      # exige que la revision activa ya tenga la imagen de este commit, para no aceptar el UP de la vieja.
+      - name: Prueba de humo (/actuator/health)
+        run: |
+          FQDN=$(az containerapp show --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          for intento in $(seq 1 10); do
+            estado=$(az containerapp revision list --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
+              --query "[?properties.active && properties.template.containers[0].image=='$IMAGE:${{ github.sha }}'].properties.healthState | [0]" -o tsv)
+            codigo=$(curl -s -o respuesta.json -w '%{http_code}' "https://$FQDN/actuator/health" || true)
+            echo "Intento $intento/10: revision con la imagen nueva=${estado:-todavia no} | HTTP $codigo $(cat respuesta.json 2>/dev/null)"
+            if [ "$estado" = "Healthy" ] && [ "$codigo" = "200" ] && grep -q '"UP"' respuesta.json; then
+              echo "La app responde UP en https://$FQDN con la imagen ${{ github.sha }}"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::La app no respondio UP en /actuator/health despues de 10 intentos. Revisar: az containerapp logs show -n $CONTAINER_APP_NAME -g $RESOURCE_GROUP"
+          exit 1
