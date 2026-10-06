@@ -87,10 +87,15 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun          # Windows: set SPRING_PROF
 
 ## Desplegar
 
-- **Automático**: cada push a `main` construye la imagen, la escanea con Trivy, la sube al Azure
-  Container Registry y actualiza la Container App (`.github/workflows/deploy.yml`).
-  - `/notdeploy` en el mensaje del commit: construye y sube, pero no despliega.
-  - `/deploy` en el mensaje del commit: no construye, redespliega la última imagen publicada.
+- **Automático**: cada push a `main` construye la imagen, la escanea con Trivy, crea el Azure
+  Container Registry, sube la imagen, actualiza la Container App, verifica que responda `UP` y al
+  final **la apaga y borra el registry** para no generar costos (`.github/workflows/deploy.yml`).
+  En la primera línea del commit:
+  - `/keeprunning`: despliega y la deja prendida.
+  - `/notdeploy`: construye y sube, pero no despliega.
+- **Levantar / Apagar**: workflows manuales (Actions → *Run workflow*). "Levantar" despliega y deja
+  la app prendida (para presentar, unos 15 minutos antes); "Apagar" la detiene y borra el registry.
+- **Costo**: con todo apagado es cero. Solo el registry cobra por existir (~USD 0,17 por día).
 - **Versionado automático**: cada push a `main` crea un tag `vX.Y.Z` según el prefijo del commit
   (`feat:` sube la Y, `fix:`/`refactor:` la Z, `!` o `BREAKING CHANGE:` la X).
 - **A mano**: `java ScriptAz.java` (menú para construir, desplegar, parar, iniciar, ver logs).

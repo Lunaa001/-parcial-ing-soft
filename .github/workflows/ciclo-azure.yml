@@ -1,0 +1,226 @@
+name: Ciclo Azure (reutilizable)
+
+# Logica comun de los workflows deploy.yml, levantar.yml y apagar.yml. El ACR Basic cobra por
+# cada dia que existe (y no se puede detener), asi que vive solo mientras la app esta levantada:
+# se crea antes del push y se borra al apagar. La Container App y el resource group NUNCA se borran.
+on:
+  workflow_call:
+    inputs:
+      construir:
+        description: Build, Trivy, crear el ACR si no existe y push
+        type: boolean
+        required: true
+      desplegar:
+        description: Credenciales del registry, update de imagen, start y prueba de humo
+        type: boolean
+        required: true
+      apagar:
+        description: Al final, detener la app y borrar el ACR (si hubo deploy, solo si la prueba de humo paso)
+        type: boolean
+        required: true
+
+env:
+  IMAGE_NAME: parcial-ing-soft
+
+jobs:
+  ciclo:
+    runs-on: ubuntu-latest
+    env:
+      ACR_NAME: ${{ secrets.ACR_NAME }}
+      CONTAINER_APP_NAME: ${{ secrets.CONTAINER_APP_NAME }}
+      RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+    steps:
+      - name: Verificar que existen los secretos necesarios
+        env:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        run: |
+          faltan=0
+          for nombre in AZURE_CREDENTIALS ACR_NAME CONTAINER_APP_NAME RESOURCE_GROUP; do
+            if [ -z "${!nombre}" ]; then
+              echo "::error::Falta el secreto de GitHub '$nombre'. Ver DEPLOY.md, seccion 'Secretos de GitHub'."
+              faltan=1
+            fi
+          done
+          if [[ "$ACR_NAME" == *.azurecr.io* || "$ACR_NAME" =~ [^a-z0-9] ]]; then
+            echo "::error::ACR_NAME tiene que ser solo el nombre del registry (minusculas y numeros, sin '.azurecr.io')."
+            faltan=1
+          fi
+          echo "IMAGE=$ACR_NAME.azurecr.io/$IMAGE_NAME" >> "$GITHUB_ENV"
+          echo "Modo: construir=${{ inputs.construir }} desplegar=${{ inputs.desplegar }} apagar=${{ inputs.apagar }}"
+          exit $faltan
+
+      - uses: actions/checkout@v7
+        if: inputs.construir
+
+      - name: Login en Azure (service principal)
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # El build y Trivy no necesitan el ACR: si Trivy encuentra un CVE, el ACR ni se crea.
+      # Etiquetas OCI (las mismas que pone ScriptAz.java): quedan grabadas en la imagen.
+      - name: Construir la imagen (Distroless, multi-stage)
+        if: inputs.construir
+        run: |
+          docker build \
+            --label "org.opencontainers.image.title=$IMAGE_NAME" \
+            --label "org.opencontainers.image.version=${{ github.sha }}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.description=App $IMAGE_NAME - Azure Container Apps" \
+            -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+
+      # Fijada por commit (v0.36.0), no por tag, para que nadie pueda cambiar el codigo que corre.
+      - name: Escanear la imagen con Trivy (CVEs HIGH/CRITICAL con parche)
+        if: inputs.construir
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: '1'
+
+      # Basic + usuario admin (el entorno Express no admite identidad administrada para el pull).
+      # El nombre es global en Azure: recien borrado puede tardar en liberarse, por eso los reintentos.
+      - name: Crear el ACR si no existe
+        id: acr
+        if: inputs.construir
+        run: |
+          if az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
+            echo "El ACR $ACR_NAME ya existe."
+            echo "creado=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          REGION=$(az group show --name "$RESOURCE_GROUP" --query location -o tsv)
+          for intento in $(seq 1 20); do
+            if az acr create --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --location "$REGION" \
+                 --sku Basic --admin-enabled true --output none; then
+              echo "ACR $ACR_NAME creado en $REGION (intento $intento)."
+              echo "creado=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Intento $intento/20: no se pudo crear el ACR (el nombre puede no estar liberado todavia). Reintento en 30 s."
+            sleep 30
+          done
+          echo "::error::No se pudo crear el ACR $ACR_NAME despues de 10 minutos."
+          exit 1
+
+      - name: Subir la imagen al registry
+        if: inputs.construir
+        run: |
+          az acr login --name "$ACR_NAME"
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      # La contrasena admin cambia cada vez que se recrea el ACR: se vuelve a cargar en la app.
+      - name: Aplicar las credenciales del ACR en la Container App
+        if: inputs.desplegar
+        run: |
+          echo "APP_TOCADA=true" >> "$GITHUB_ENV"
+          PASSWORD=$(az acr credential show --name "$ACR_NAME" --query "passwords[0].value" -o tsv)
+          echo "::add-mask::$PASSWORD"
+          az containerapp registry set \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --server "$ACR_NAME.azurecr.io" \
+            --username "$ACR_NAME" \
+            --password "$PASSWORD" \
+            --output none
+
+      # Orden update -> start: si se prendiera antes, la app intentaria bajar la imagen vieja, que no
+      # existe en el ACR recreado. Si Azure no acepta el update con la app detenida, start -> update.
+      - name: Desplegar la imagen nueva (update y start)
+        if: inputs.desplegar
+        run: |
+          APP_ID=$(az containerapp show --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)
+          estado() { az containerapp show --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" --query properties.runningStatus -o tsv; }
+          iniciar() {
+            az rest --method post --url "https://management.azure.com${APP_ID}/start?api-version=2026-07-01" --output none
+            for i in $(seq 1 24); do [ "$(estado)" = "Running" ] && return 0; sleep 5; done
+            echo "::warning::La app todavia no figura Running; la prueba de humo sigue esperando."
+          }
+          actualizar() {
+            az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
+              --image "$IMAGE:${{ github.sha }}" --output none
+          }
+          INICIAL=$(estado)
+          echo "Estado inicial de la app: $INICIAL"
+          if actualizar; then
+            ORDEN="update -> start"
+            if [ "$INICIAL" = "Stopped" ]; then
+              iniciar
+            fi
+          elif [ "$INICIAL" = "Stopped" ]; then
+            ORDEN="start -> update"
+            echo "::warning::Azure no acepto el update con la app detenida: se usa start -> update."
+            iniciar
+            actualizar
+          else
+            echo "::error::Fallo el update de la imagen."
+            exit 1
+          fi
+          echo "Orden usado: $ORDEN"
+          echo "### Orden de despliegue: $ORDEN (estado inicial: $INICIAL)" >> "$GITHUB_STEP_SUMMARY"
+
+      # Despues del update la revision nueva puede responder 503 mientras arranca. Ademas se exige
+      # que la revision activa ya tenga la imagen de este commit, para no aceptar el UP de la vieja.
+      - name: Prueba de humo (/actuator/health)
+        id: humo
+        if: inputs.desplegar
+        run: |
+          FQDN=$(az containerapp show --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          for intento in $(seq 1 10); do
+            estado=$(az containerapp revision list --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
+              --query "[?properties.active && properties.template.containers[0].image=='$IMAGE:${{ github.sha }}'].properties.healthState | [0]" -o tsv)
+            codigo=$(curl -s -o respuesta.json -w '%{http_code}' "https://$FQDN/actuator/health" || true)
+            echo "Intento $intento/10: revision con la imagen nueva=${estado:-todavia no} | HTTP $codigo $(cat respuesta.json 2>/dev/null)"
+            if [ "$estado" = "Healthy" ] && [ "$codigo" = "200" ] && grep -q '"UP"' respuesta.json; then
+              echo "La app responde UP en https://$FQDN con la imagen ${{ github.sha }}"
+              echo "### La app responde UP en https://$FQDN" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::La app no respondio UP en /actuator/health despues de 10 intentos. Queda prendida para revisar: az containerapp logs show -n $CONTAINER_APP_NAME -g $RESOURCE_GROUP. Despues correr el workflow 'Apagar'."
+          exit 1
+
+      # Si hubo deploy, solo se apaga si la prueba de humo paso (si fallo, queda prendida para revisar).
+      - name: Apagar (detener la app y borrar el ACR)
+        if: inputs.apagar && (!inputs.desplegar || steps.humo.outcome == 'success')
+        run: |
+          APP_ID=$(az containerapp show --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)
+          estado() { az containerapp show --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" --query properties.runningStatus -o tsv; }
+          if [ "$(estado)" != "Stopped" ]; then
+            az rest --method post --url "https://management.azure.com${APP_ID}/stop?api-version=2026-07-01" --output none
+          fi
+          for i in $(seq 1 24); do [ "$(estado)" = "Stopped" ] && break; sleep 5; done
+          FINAL=$(estado)
+          echo "runningStatus: $FINAL"
+          if [ "$FINAL" != "Stopped" ]; then
+            echo "::error::La app no quedo Stopped (estado: $FINAL). No se borra el ACR."
+            exit 1
+          fi
+          if az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
+            az acr delete --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --yes --output none
+            echo "ACR $ACR_NAME borrado."
+          else
+            echo "El ACR $ACR_NAME ya no existia."
+          fi
+          echo "### Apagado: app Stopped y ACR borrado (sin costo)" >> "$GITHUB_STEP_SUMMARY"
+
+      # Si algo fallo despues de crear el ACR y antes de tocar la app (por ejemplo el push), el ACR
+      # recien creado no sirve para nada y cobra: se borra. Uno que ya existia no se toca.
+      - name: Limpieza (borrar el ACR creado si fallo antes de desplegar)
+        if: failure() && steps.acr.outputs.creado == 'true' && env.APP_TOCADA != 'true'
+        run: |
+          az acr delete --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --yes --output none
+          echo "ACR $ACR_NAME borrado: fallo un paso antes de desplegar y la app no se toco."
+
+      - name: Logout from Azure
+        if: always()
+        run: az logout || true

@@ -1,0 +1,23 @@
+name: Levantar
+
+# Manual (Actions -> Levantar -> Run workflow), por ejemplo ~15 minutos antes de presentar.
+# Igual que el workflow principal (build, Trivy, crear ACR, push, deploy, prueba de humo), pero
+# NUNCA apaga al final: la app queda prendida hasta correr "Apagar".
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-perfume
+  cancel-in-progress: false
+
+jobs:
+  ciclo:
+    uses: ./.github/workflows/ciclo-azure.yml
+    with:
+      construir: true
+      desplegar: true
+      apagar: false
+    secrets: inherit

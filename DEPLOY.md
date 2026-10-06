@@ -2,7 +2,9 @@
 
 Este repo construye la imagen (Dockerfile multi-stage con runtime Distroless), la escanea con Trivy
 y la despliega en Azure Container Apps cada vez que se hace push a `main`
-(`.github/workflows/deploy.yml`). También se puede correr a mano desde Actions → *Run workflow*.
+(`.github/workflows/deploy.yml`). Para no generar costos, al terminar **detiene la app y borra el
+Container Registry**, que es lo único que cobra por existir (ver "Costos y limpieza final"). Para
+dejarla prendida, por ejemplo para presentar, está el workflow **Levantar**; para apagarla, **Apagar**.
 
 ## Decisiones
 
@@ -14,7 +16,10 @@ y la despliega en Azure Container Apps cada vez que se hace push a `main`
   secretos de la Container App (para la aplicación).
 - **Acceso al registry**: GitHub sube la imagen con el service principal (`az acr login`). La
   Container App la descarga con el usuario admin del ACR, porque el entorno **Express** no admite
-  identidad administrada. Por eso el usuario admin del ACR tiene que quedar habilitado.
+  identidad administrada. Como el ACR se recrea en cada levantada, su contraseña admin cambia: el
+  pipeline la lee (`az acr credential show`) y la vuelve a cargar en la app (`registry set`).
+- **ACR efímero**: el ACR existe solo mientras la app está levantada. La Container App, su
+  configuración (secretos y variables) y el resource group **nunca** se borran.
 - **Health check**: `GET /actuator/health` (público). Métricas de CPU/memoria en
   `/actuator/metrics` (requieren login admin). Trazas por request: header `X-Request-Id` y
   duración en los logs.
@@ -30,44 +35,73 @@ Los valores (claves, contraseñas, URLs) no están en el código: salen de varia
 La lista completa está en `.env.example`. El perfil de desarrollo local tiene su plantilla en
 `src/main/resources/application-dev.properties.example`; el archivo real está en `.gitignore`.
 
-## Pipeline (`deploy.yml`)
+## Workflows de GitHub Actions
 
-Un solo job, en este orden:
+| Workflow | Cuándo corre | Qué hace | Cómo queda |
+|---|---|---|---|
+| `deploy.yml` (CI/CD) | push a `main` (salvo si solo cambian `.md`) o *Run workflow* | build → Trivy → crea el ACR → push → deploy → prueba de humo → **apaga** | app detenida, ACR borrado |
+| `levantar.yml` (**Levantar**) | solo manual (*Run workflow*) | lo mismo, pero **no apaga** | app prendida, ACR existiendo |
+| `apagar.yml` (**Apagar**) | solo manual | detiene la app, verifica `Stopped` y borra el ACR (si ya no existe, no falla) | app detenida, ACR borrado |
+| `versioning.yml` | push a `main` | crea el tag `vX.Y.Z` | — |
+
+Los tres primeros usan la misma lógica, que está en `ciclo-azure.yml` (workflow reutilizable con
+tres interruptores: construir, desplegar y apagar), y comparten el grupo de `concurrency`
+`azure-perfume`: nunca corren a la vez, así "Apagar" no puede borrar el ACR en medio de un deploy.
+
+### Pasos del ciclo (`ciclo-azure.yml`)
 
 1. **Verifica los secretos**: si falta alguno (o `ACR_NAME` trae `.azurecr.io`), falla con un mensaje claro.
-2. **Lee el mensaje del commit** para ver si trae `/deploy` o `/notdeploy` (ver abajo).
-3. **Login en Azure** con `AZURE_CREDENTIALS` y **login en el ACR** con `az acr login`.
-4. **Construye** la imagen con dos tags (el SHA del commit y `latest`) y etiquetas OCI: título,
+2. **Login en Azure** con `AZURE_CREDENTIALS`.
+3. **Construye** la imagen con dos tags (el SHA del commit y `latest`) y etiquetas OCI: título,
    versión, fecha, commit, repo y descripción (`docker inspect` las muestra).
-5. **Escanea** la imagen con Trivy: falla si hay CVEs HIGH o CRITICAL que ya tengan parche. Se
-   escanea antes del push, así una imagen vulnerable nunca llega al registry.
-6. **Sube** la imagen al ACR.
-7. **Despliega** con `az containerapp update --image <acr>/parcial-ing-soft:<sha>`.
-8. **Prueba de humo**: espera a que la revisión activa tenga la imagen nueva y esté `Healthy`, y a
+4. **Escanea** la imagen con Trivy: falla si hay CVEs HIGH o CRITICAL que ya tengan parche. El
+   build y Trivy no necesitan el ACR, así que si Trivy encuentra algo **el ACR ni se crea**.
+5. **Crea el ACR** si no existe: `rg-perfume`, misma región, Basic, usuario admin habilitado. El
+   nombre es global en Azure y recién borrado puede tardar en liberarse: reintenta hasta 10 minutos.
+6. **Sube** la imagen al ACR (`az acr login` + `docker push`).
+7. **Credenciales del registry**: lee la contraseña admin del ACR, la oculta del log
+   (`::add-mask::`) y la carga en la app con `az containerapp registry set`.
+8. **Despliega**: `az containerapp update --image <acr>/parcial-ing-soft:<sha>` y, si la app estaba
+   detenida, la inicia (`az rest .../start`). Va en ese orden (**update → start**) porque si se
+   prendiera antes, intentaría bajar la imagen anterior, que no existe en el ACR recreado. Si Azure
+   no aceptara el update con la app detenida, el paso usa start → update y lo avisa con un warning;
+   el orden usado queda en el resumen del run.
+9. **Prueba de humo**: espera a que la revisión activa tenga la imagen nueva y esté `Healthy`, y a
    que `/actuator/health` responda `UP` (10 intentos cada 15 segundos).
-9. **Logout de Azure** (`az logout`), siempre, aunque haya fallado un paso anterior.
+10. **Apaga** (solo `deploy.yml` y "Apagar"): detiene la app, verifica `runningStatus=Stopped` y
+    borra el ACR. Si hubo deploy, solo apaga si la prueba de humo pasó: si falló, la app queda
+    prendida para revisar los logs, y después hay que correr "Apagar".
+11. **Limpieza**: si algo falla después de crear el ACR y antes de tocar la app (por ejemplo el
+    push), borra ese ACR recién creado, porque no sirve para nada y cobra.
+12. **Logout de Azure** (`az logout`), siempre, aunque haya fallado un paso anterior.
 
 No usa `azure/container-apps-deploy-action` (como el proyecto de referencia) porque esa action
 crea el entorno en otra región y modo; el nuestro es **Express en `chilecentral`**, y con
 `az containerapp update` se actualiza la app existente sin tocar el entorno.
 
-### Controles por mensaje de commit: `/deploy` y `/notdeploy`
+### Controles por mensaje de commit: `/notdeploy` y `/keeprunning`
 
-| Mensaje del commit contiene | Construye, escanea y sube | Despliega |
-|---|---|---|
-| (nada especial) | sí | sí, la imagen recién construida |
-| `/notdeploy` | sí | **no** |
-| `/deploy` | **no** | sí, la última imagen publicada (`:latest`) |
+Solo cuentan si están en la **primera línea** del mensaje del commit. Así, un commit que *describe*
+estos controles en el cuerpo no los activa.
 
-Ejemplos: `git commit -m "docs: corregir README /notdeploy"` o
-`git commit --allow-empty -m "chore: redesplegar /deploy"`.
+| Primera línea del commit contiene | Construye, escanea y sube | Despliega | Apaga al final |
+|---|---|---|---|
+| (nada especial) | sí | sí | **sí** (app detenida, ACR borrado) |
+| `/keeprunning` | sí | sí | **no** (queda prendida, como "Levantar") |
+| `/notdeploy` | sí | **no** | **no**: el ACR queda existiendo (y cobrando) hasta correr "Apagar" |
 
-Con `/deploy`, el pipeline busca en el ACR el digest de `parcial-ing-soft:latest` y despliega
-`<acr>/parcial-ing-soft@sha256:...`. Así siempre se crea una revisión nueva (aunque la app ya
-estuviera en `:latest`) y la prueba de humo sabe exactamente qué imagen tiene que estar corriendo.
+Ejemplo: `git commit -m "fix: corregir validacion /keeprunning"`. Con `/notdeploy` solo se valida
+que el build y Trivy pasen: la imagen subida se pierde en el próximo "Apagar".
 
 El mensaje del commit se pasa al script como variable de entorno (`COMMIT_MSG`), nunca
 interpolado: si alguien escribiera `$(comando)` en un commit, no se ejecuta.
+
+### Por qué no hay `/deploy`
+
+En la referencia, `/deploy` redespliega la última imagen guardada en el registry sin construir.
+Acá el ACR se borra entero al apagar, así que **no quedan imágenes guardadas** para redesplegar:
+cada levantada construye la imagen de nuevo desde el código. Por el mismo motivo no hace falta
+limpiar imágenes viejas.
 
 ## Versionado automático (`versioning.yml`)
 
@@ -120,9 +154,9 @@ pregunta nombre de imagen (`parcial-ing-soft`), tag y puerto (`8080`).
 | Opción | Qué hace | Comandos que usa |
 |---|---|---|
 | **1** Construir y subir | build local `linux/amd64` con etiquetas OCI, push (tag + `latest`) y verifica que el tag esté en el ACR | `docker build`, `az acr login`, `docker push`, `az acr repository show-tags` |
-| **2** Deploy | si la app no existe la crea; si existe actualiza imagen, CPU, memoria y réplicas. Si estaba detenida la inicia. Muestra la URL | `az containerapp create/update`, `az containerapp registry set` |
+| **2** Deploy | si la app no existe la crea; si existe carga las credenciales admin del ACR y actualiza imagen, CPU, memoria y réplicas. Si estaba detenida la inicia. Muestra la URL | `az acr credential show`, `az containerapp registry set`, `az containerapp create/update` |
 | **3a** Parar | detiene la app (no consume créditos) y espera `Stopped` | `az rest .../stop?api-version=2026-07-01` |
-| **3b** Iniciar | la vuelve a levantar y espera `Running` | `az rest .../start?api-version=2026-07-01` |
+| **3b** Iniciar | la vuelve a levantar y espera `Running` (necesita el ACR: al iniciar baja la imagen) | `az rest .../start?api-version=2026-07-01` |
 | **3c** Listar | tabla con nombre, estado, CPU, memoria, réplicas y URL de las apps del grupo | `az containerapp list` |
 | **3d** Eliminar | borra una app (pide confirmación; es irreversible) | `az containerapp delete` |
 | **4** Pull | baja la imagen del ACR y ofrece correrla en local (con `--env-file .env`) | `docker pull`, `docker run` |
@@ -130,9 +164,17 @@ pregunta nombre de imagen (`parcial-ing-soft`), tag y puerto (`8080`).
 | **6** Reconfigurar | vuelve a elegir los recursos | `az group/acr/containerapp list` |
 | **0** Salir | ofrece cerrar la sesión de Azure CLI | `az logout` |
 
+**Opciones que necesitan el ACR: 1 (build/push), 2 (deploy), 3b (iniciar) y 4 (pull).** Como el
+ACR solo existe mientras la app está levantada, antes de hacer nada verifican que exista. Si no
+existe, muestran: *"El ACR no existe: está apagado para no generar costos. Corré el workflow
+'Levantar'..."*. Las opciones 3a, 3c, 3d, 5 y 6 funcionan sin el ACR.
+
 Diferencias con el `script_az.py` original:
 
 - Está en Java, como el resto del proyecto.
+- El deploy (opción 2) usa las **credenciales admin del ACR**, igual que el pipeline, y no las del
+  service principal. El secreto del service principal vence (el nuestro, el 2027-10-06) y tiene
+  permisos sobre todo el resource group; el usuario admin solo sirve para el registry y no vence.
 - Puerto por defecto 8080 (no 3000), imagen `parcial-ing-soft` y api-version `2026-07-01` en
   parar/iniciar (la que se probó con nuestra app).
 - En los logs se vuelve al menú con **Enter** y no con Ctrl+C: en Java, Ctrl+C cierra todo el
@@ -244,8 +286,8 @@ comando que tenga un argumento que empiece con `/`.
 az login
 az group create -n $RG -l $LOC
 
-# 2. Container Registry, con usuario admin (lo usa la Container App para descargar la imagen)
-az acr create -g $RG -n $ACR --sku Basic --admin-enabled true
+# 2. Container Registry: NO hace falta crearlo a mano. Lo crea el pipeline (o "Levantar") cuando
+#    lo necesita y lo borra al apagar. A mano: az acr create -g $RG -n $ACR --sku Basic --admin-enabled true
 
 # 3. Entorno (en nuestra suscripción quedó en modo Express) y Container App,
 #    con una imagen placeholder hasta el primer push del pipeline
@@ -255,9 +297,10 @@ az containerapp create -n $APP -g $RG --environment $ENV \
   --target-port 8080 --ingress external \
   --min-replicas 1 --max-replicas 1
 
-# 4. Credenciales del registry para que la app descargue la imagen
-az containerapp registry set -n $APP -g $RG --server $ACR.azurecr.io \
-  --username $ACR --password "$(az acr credential show -n $ACR --query 'passwords[0].value' -o tsv)"
+# 4. Credenciales del registry: las carga el pipeline en cada deploy (cambian al recrear el ACR).
+#    A mano, con el ACR existiendo:
+#    az containerapp registry set -n $APP -g $RG --server $ACR.azurecr.io \
+#      --username $ACR --password "$(az acr credential show -n $ACR --query 'passwords[0].value' -o tsv)"
 
 # 5. Secretos y variables de la aplicación
 az containerapp secret set -n $APP -g $RG --secrets \
@@ -325,13 +368,18 @@ mientras arranca la JVM; a los ~30 segundos vuelve `{"status":"UP"}` con HTTP 20
 Si en una versión futura de la CLI aparecen `az containerapp stop/start`, hacen lo mismo:
 `az containerapp stop -n $APP -g $RG`.
 
+**Importante:** con el ACR borrado (estado normal, todo apagado), el `start` a mano **no alcanza**:
+la app intenta bajar la imagen de un registry que no existe y no levanta. Para prender y apagar se
+usan los workflows **Levantar** y **Apagar** (ver "Costos y limpieza final"). El `stop` a mano
+sí funciona siempre, pero deja el ACR existiendo (y cobrando).
+
 ## Fork o repo nuevo
 
 Los secretos **no se copian** con el fork ni al cambiar de repo. Hay que cargar a mano:
 
 - En el repo nuevo de GitHub: los 4 secretos de la tabla "Secretos de GitHub".
-- En la Container App nueva (si también se crea una): los secretos y variables de su tabla, y las
-  credenciales del registry (paso 4).
+- En la Container App nueva (si también se crea una): los secretos y variables de su tabla. Las
+  credenciales del registry las carga el pipeline solo.
 
 Si falta alguno de GitHub, el primer paso del pipeline lo avisa con su nombre.
 
@@ -374,12 +422,64 @@ y `/actuator/metrics` con el token.
 versiones o superiores (se ve en `spring-boot-dependencies-<version>.pom`, en Maven Central). Si se
 dejan, podrían quedar fijadas versiones más viejas que las que traería el Spring Boot nuevo.
 
+## Costos y limpieza final
+
+### Qué cobra y qué no
+
+| Recurso | ¿Cobra? | Detalle |
+|---|---|---|
+| **Container Registry (ACR) Basic** | **sí, por existir** | ~USD 0,17 por día, proporcional a las horas, aunque no se use. No se puede detener: solo deja de cobrar si se borra. Por eso se crea al levantar y se borra al apagar |
+| Container App **detenida** | no | `Stopped` no consume CPU ni memoria |
+| Container App **prendida** | casi nada | entra en el cupo gratis mensual de Container Apps mientras se use poco |
+| Log Analytics (`workspace-rgperfume…`) | prácticamente no | lo usa el entorno para los logs; los primeros 5 GB por mes son gratis. Se deja |
+| Entorno Container Apps, resource group | no | |
+
+**Con todo apagado (app detenida y ACR borrado), el gasto es cero.** Los USD 0,11 que aparecieron
+en Cost Management fueron todos del ACR (06/10/2026, unas 16 horas de existencia), cuando quedaba
+creado todo el día.
+
+### Antes de presentar: Levantar
+
+1. GitHub → **Actions → Levantar → Run workflow** (rama `main`), **unos 15 minutos antes**.
+2. Tarda unos minutos (crear el ACR, build, Trivy, push, deploy y arranque). Termina en verde solo
+   si la prueba de humo vio `UP` con la imagen nueva.
+3. Verificar:
+   ```bash
+   az containerapp show -n perfume-api -g rg-perfume --query properties.runningStatus -o tsv   # Running
+   curl https://<fqdn>/actuator/health                                                         # {"status":"UP"}
+   ```
+   El FQDN también aparece en el resumen del run.
+
+### Después de presentar: Apagar
+
+GitHub → **Actions → Apagar → Run workflow**. Detiene la app, verifica `Stopped` y borra el ACR.
+También sirve si un run falló y dejó la app prendida o el ACR existiendo.
+
+Para comprobar que no queda nada cobrando:
+```bash
+az containerapp show -n perfume-api -g rg-perfume --query properties.runningStatus -o tsv   # Stopped
+az acr list -g rg-perfume -o table                                                           # vacío
+```
+
+### Al terminar la materia: borrar todo
+
+```bash
+az group delete -n rg-perfume
+```
+
+Borra **todo** el resource group: la Container App con sus secretos, el entorno, el Log Analytics y
+el ACR si existiera. **Es irreversible**: para volver a desplegar habría que repetir los "Pasos
+manuales" desde cero. Después conviene borrar también el service principal
+(`az ad sp delete --id <appId>`) y el secreto `AZURE_CREDENTIALS` de GitHub.
+
 ## Estado real del despliegue (lo que se probó)
 
 - Región: `chilecentral` (la política de la suscripción de estudiante solo permite
   newzealandnorth, mexicocentral, southafricanorth, chilecentral y northcentralus).
 - Entorno Container Apps **Express**: no admite identidad administrada ni sufijos de revisión (la
   revisión se llama siempre `perfume-api--latest`). El registry usa usuario administrador.
+- Se borró la identidad administrada `id-perfume-acr`, que había quedado de un intento anterior y
+  no se usaba (Express no la admite).
 - `az acr build` no funciona en `chilecentral`: la imagen se construye en GitHub Actions y se sube con Docker.
 - Health check en producción: `https://<fqdn>/actuator/health` responde `UP`. Justo después de
   actualizar la imagen puede responder 503 mientras arranca la revisión nueva; luego vuelve a 200.
@@ -397,4 +497,6 @@ dejan, podrían quedar fijadas versiones más viejas que las que traería el Spr
 - **Paridad dev/prod**: en la nube se usa H2 y en desarrollo PostgreSQL. Se atenúa con
   `MODE=PostgreSQL` y con las mismas migraciones de Flyway en los dos.
 - **Usuario admin del ACR**: tiene que quedar habilitado porque Express no admite identidad
-  administrada para descargar la imagen.
+  administrada para descargar la imagen. El pipeline crea el ACR con el usuario admin activado.
+- **ACR efímero**: con todo apagado no hay imágenes guardadas. Prender la app siempre implica
+  construir de nuevo (workflow "Levantar", unos minutos), y no existe `/deploy`.

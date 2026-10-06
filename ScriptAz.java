@@ -13,6 +13,9 @@
  *   4) Pull de la imagen desde el ACR
  *   5) Logs en tiempo real
  *
+ * El ACR existe solo mientras la app esta levantada (se borra al apagar para no generar costos):
+ * las opciones 1, 2, 3b y 4 lo necesitan y avisan si no esta (correr el workflow "Levantar").
+ *
  * Requisitos: JDK 25, Docker Desktop en ejecucion, Azure CLI (az) y un .env con las
  * credenciales del Service Principal (ver .env.example).
  *
@@ -724,7 +727,7 @@ public class ScriptAz {
         /** Pull de la imagen desde el ACR y ejecucion local opcional. */
         boolean pull() {
             section("Pull desde Azure Container Registry — " + config.fullImage());
-            if (!auth.acrLogin()) {
+            if (!requireAcr(config) || !auth.acrLogin()) {
                 return false;
             }
             logInfo("docker pull " + config.fullImage());
@@ -799,9 +802,20 @@ public class ScriptAz {
                 logErr("Infraestructura incompleta (resource group / ACR / environment)");
                 return false;
             }
-            // Credenciales del ACR: las del .env (Service Principal)
-            String username = config.clientId;
-            String password = config.clientSecret;
+            if (!requireAcr(config)) {
+                return false;
+            }
+            // Credenciales del ACR: las del usuario admin (igual que el pipeline). No se usa el
+            // Service Principal: su secreto vence y tiene permisos sobre todo el resource group.
+            // La contrasena cambia cada vez que se recrea el ACR, por eso se lee en cada deploy.
+            Result cred = runCmd(List.of("az", "acr", "credential", "show", "--name", config.acrName,
+                    "--query", "passwords[0].value", "-o", "tsv"), 60);
+            if (cred.code() != 0 || cred.out().isEmpty()) {
+                logErr("No se pudieron leer las credenciales admin del ACR (¿usuario admin habilitado?)");
+                return false;
+            }
+            String username = config.acrName;
+            String password = cred.out();
 
             List<String> cmd;
             if (!exists()) {
@@ -823,7 +837,7 @@ public class ScriptAz {
             } else {
                 logInfo("La app '" + config.appName + "' ya existe → ACTUALIZAR");
                 // az containerapp update no acepta --registry-*: se aplican antes con registry set
-                logInfo("az containerapp registry set ... (credenciales del .env)");
+                logInfo("az containerapp registry set ... (usuario admin del ACR)");
                 int code = runStream(List.of("az", "containerapp", "registry", "set",
                         "--name", config.appName,
                         "--resource-group", config.resourceGroup,
@@ -831,7 +845,7 @@ public class ScriptAz {
                         "--username", username,
                         "--password", password));
                 if (code != 0) {
-                    logErr("No se pudieron aplicar las credenciales del ACR (.env)");
+                    logErr("No se pudieron aplicar las credenciales admin del ACR");
                     return false;
                 }
                 cmd = List.of("az", "containerapp", "update",
@@ -968,6 +982,10 @@ public class ScriptAz {
                 return false;
             }
             if (getRunningStatus().equalsIgnoreCase("stopped")) {
+                // Al iniciar, la app baja la imagen del ACR: sin ACR la revision no levanta
+                if (!requireAcr(config)) {
+                    return false;
+                }
                 if (!startAction()) {
                     logErr("No se pudo iniciar la app");
                     return false;
@@ -1077,6 +1095,25 @@ public class ScriptAz {
         }
     }
 
+    /**
+     * El ACR existe solo mientras la app esta levantada (se borra al apagar porque el plan Basic
+     * cobra por dia). Las opciones que lo necesitan (1 build/push, 2 deploy, 3b iniciar, 4 pull)
+     * lo verifican antes y explican que hacer si no esta.
+     */
+    static boolean requireAcr(Config c) {
+        if (c.acrName.isEmpty()) {
+            logErr("No hay un ACR elegido — usá la opción 6 (Reconfigurar)");
+            return false;
+        }
+        if (runCmd(List.of("az", "acr", "show", "--name", c.acrName, "--output", "none"), 60).code() == 0) {
+            return true;
+        }
+        logErr("El ACR '" + c.acrName + "' no existe: está apagado para no generar costos.");
+        OUT.println("    " + Color.warn("Corré el workflow 'Levantar' en GitHub (Actions → Levantar → Run workflow),"));
+        OUT.println("    " + Color.warn("que crea el ACR, sube la imagen y deja la app prendida. Después volvé a esta opción."));
+        return false;
+    }
+
     static void sleep(int seconds) {
         try {
             Thread.sleep(seconds * 1000L);
@@ -1179,8 +1216,11 @@ public class ScriptAz {
             String choice = readLine("  " + Color.info("Opción") + ": ");
             switch (choice) {
                 case "1" -> {
-                    // Build local con telemetria + push inmediato al ACR + verificacion
-                    if (dockerOps.buildWithTelemetry()) {
+                    // Build local con telemetria + push inmediato al ACR + verificacion.
+                    // El ACR se verifica antes del build para no esperar minutos y fallar en el push.
+                    if (!requireAcr(config)) {
+                        logWarn("Build omitido");
+                    } else if (dockerOps.buildWithTelemetry()) {
                         if (auth.acrLogin() && dockerOps.push()) {
                             dockerOps.verifyInRegistry();
                         }

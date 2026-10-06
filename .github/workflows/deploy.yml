@@ -1,164 +1,60 @@
-name: CI/CD - construir, escanear y desplegar en Azure Container Apps
+name: CI/CD - construir, escanear, desplegar y apagar
 
 # Push a main -> automatico. workflow_dispatch -> boton "Run workflow" en la pestana Actions.
-# Controles por mensaje de commit:
-#   /notdeploy -> construye, escanea y sube la imagen, pero no despliega.
-#   /deploy    -> no construye: redespliega la ultima imagen publicada (:latest).
+# Ciclo normal: build -> Trivy -> crear ACR -> push -> deploy -> prueba de humo -> detener la app
+# y borrar el ACR (el ACR Basic cobra por dia mientras existe). Para dejarla prendida: workflow
+# "Levantar" o "/keeprunning". Controles en la PRIMERA linea del mensaje del commit:
+#   /notdeploy   -> construye, escanea y sube la imagen, pero no despliega ni apaga.
+#   /keeprunning -> despliega y deja la app prendida (no detiene ni borra el ACR).
 on:
   push:
     branches: [main]
+    # Un commit que solo cambia documentacion no levanta la app ni crea el ACR
+    paths-ignore: ['**.md']
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Dos pushes seguidos no despliegan a la vez: el segundo espera al primero
+# Comun a deploy, Levantar y Apagar: nunca corren a la vez (Apagar no borra el ACR en medio de un push)
 concurrency:
-  group: deploy-main
+  group: azure-perfume
   cancel-in-progress: false
 
-env:
-  IMAGE_NAME: parcial-ing-soft
-
 jobs:
-  build-scan-deploy:
+  control:
     runs-on: ubuntu-latest
-    env:
-      ACR_NAME: ${{ secrets.ACR_NAME }}
-      CONTAINER_APP_NAME: ${{ secrets.CONTAINER_APP_NAME }}
-      RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+    outputs:
+      desplegar: ${{ steps.leer.outputs.desplegar }}
+      apagar: ${{ steps.leer.outputs.apagar }}
     steps:
-      - name: Verificar que existen los secretos necesarios
-        env:
-          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
-        run: |
-          faltan=0
-          for nombre in AZURE_CREDENTIALS ACR_NAME CONTAINER_APP_NAME RESOURCE_GROUP; do
-            if [ -z "${!nombre}" ]; then
-              echo "::error::Falta el secreto de GitHub '$nombre'. Ver DEPLOY.md, seccion 'Secretos de GitHub'."
-              faltan=1
-            fi
-          done
-          if [[ "$ACR_NAME" == *.azurecr.io* || "$ACR_NAME" =~ [^a-z0-9] ]]; then
-            echo "::error::ACR_NAME tiene que ser solo el nombre del registry (minusculas y numeros, sin '.azurecr.io')."
-            faltan=1
-          fi
-          exit $faltan
-
-      # El mensaje del commit va por variable de entorno (no interpolado en el script) para
-      # evitar command injection: alguien podria meter "$(...)" o backticks en un commit.
-      - name: Leer controles del mensaje de commit (/deploy, /notdeploy)
-        id: control
+      # El mensaje del commit va por variable de entorno (no interpolado en el script) para evitar
+      # command injection. Solo cuenta la primera linea: asi un commit que DESCRIBE estos controles
+      # en el cuerpo no los activa.
+      - name: Leer controles de la primera linea del commit (/notdeploy, /keeprunning)
+        id: leer
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
-          echo "IMAGE=$ACR_NAME.azurecr.io/$IMAGE_NAME" >> "$GITHUB_ENV"
-          construir=true
+          PRIMERA=$(printf '%s\n' "$COMMIT_MSG" | head -n 1)
           desplegar=true
-          if [[ "$COMMIT_MSG" == *"/deploy"* ]]; then
-            construir=false
-            echo "/deploy: se redespliega la ultima imagen publicada, sin construir."
-          fi
-          if [[ "$COMMIT_MSG" == *"/notdeploy"* ]]; then
+          apagar=true
+          if [[ "$PRIMERA" == *"/notdeploy"* ]]; then
             desplegar=false
-            echo "/notdeploy: se construye, escanea y sube la imagen, pero no se despliega."
+            apagar=false
+            echo "/notdeploy: se construye, escanea y sube la imagen, pero no se despliega ni se apaga."
+          elif [[ "$PRIMERA" == *"/keeprunning"* ]]; then
+            apagar=false
+            echo "/keeprunning: se despliega y la app queda prendida."
           fi
-          echo "construir=$construir" >> "$GITHUB_OUTPUT"
           echo "desplegar=$desplegar" >> "$GITHUB_OUTPUT"
+          echo "apagar=$apagar" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v7
-        if: steps.control.outputs.construir == 'true'
-
-      - name: Login en Azure (service principal)
-        uses: azure/login@v3
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Login en Azure Container Registry (con el service principal)
-        run: az acr login --name "$ACR_NAME"
-
-      # Etiquetas OCI (las mismas que pone ScriptAz.java): quedan grabadas en la imagen
-      - name: Construir la imagen (Distroless, multi-stage)
-        if: steps.control.outputs.construir == 'true'
-        run: |
-          docker build \
-            --label "org.opencontainers.image.title=$IMAGE_NAME" \
-            --label "org.opencontainers.image.version=${{ github.sha }}" \
-            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --label "org.opencontainers.image.revision=${{ github.sha }}" \
-            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-            --label "org.opencontainers.image.description=App $IMAGE_NAME - Azure Container Apps" \
-            -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
-
-      # Antes del push: una imagen con CVEs HIGH/CRITICAL que tengan parche no llega al registry.
-      # Fijada por commit (v0.36.0), no por tag, para que nadie pueda cambiar el codigo que corre.
-      - name: Escanear la imagen con Trivy (CVEs HIGH/CRITICAL con parche)
-        if: steps.control.outputs.construir == 'true'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
-          scanners: vuln
-          vuln-type: os,library
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          format: table
-          exit-code: '1'
-
-      - name: Subir la imagen al registry
-        if: steps.control.outputs.construir == 'true'
-        run: |
-          docker push "$IMAGE:${{ github.sha }}"
-          docker push "$IMAGE:latest"
-
-      # Imagen a desplegar: la recien construida (tag del commit) o, con /deploy, la que hoy es
-      # :latest en el ACR, fijada por digest para que se cree una revision nueva y se sepa cual corre.
-      - name: Elegir la imagen a desplegar
-        if: steps.control.outputs.desplegar == 'true'
-        run: |
-          if [ "${{ steps.control.outputs.construir }}" = "true" ]; then
-            DEPLOY_IMAGE="$IMAGE:${{ github.sha }}"
-          else
-            DIGEST=$(az acr repository show --name "$ACR_NAME" --image "$IMAGE_NAME:latest" --query digest -o tsv)
-            if [ -z "$DIGEST" ]; then
-              echo "::error::No hay una imagen $IMAGE_NAME:latest en el ACR para redesplegar."
-              exit 1
-            fi
-            DEPLOY_IMAGE="$IMAGE@$DIGEST"
-          fi
-          echo "Imagen a desplegar: $DEPLOY_IMAGE"
-          echo "DEPLOY_IMAGE=$DEPLOY_IMAGE" >> "$GITHUB_ENV"
-
-      - name: Actualizar la Container App a la imagen nueva
-        if: steps.control.outputs.desplegar == 'true'
-        run: |
-          az containerapp update \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --image "$DEPLOY_IMAGE" \
-            --output none
-
-      # Justo despues del update la revision nueva puede responder 503 mientras arranca. Ademas se
-      # exige que la revision activa ya tenga la imagen desplegada, para no aceptar el UP de la vieja.
-      - name: Prueba de humo (/actuator/health)
-        if: steps.control.outputs.desplegar == 'true'
-        run: |
-          FQDN=$(az containerapp show --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
-            --query properties.configuration.ingress.fqdn -o tsv)
-          for intento in $(seq 1 10); do
-            estado=$(az containerapp revision list --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
-              --query "[?properties.active && properties.template.containers[0].image=='$DEPLOY_IMAGE'].properties.healthState | [0]" -o tsv)
-            codigo=$(curl -s -o respuesta.json -w '%{http_code}' "https://$FQDN/actuator/health" || true)
-            echo "Intento $intento/10: revision con la imagen nueva=${estado:-todavia no} | HTTP $codigo $(cat respuesta.json 2>/dev/null)"
-            if [ "$estado" = "Healthy" ] && [ "$codigo" = "200" ] && grep -q '"UP"' respuesta.json; then
-              echo "La app responde UP en https://$FQDN con la imagen $DEPLOY_IMAGE"
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "::error::La app no respondio UP en /actuator/health despues de 10 intentos. Revisar: az containerapp logs show -n $CONTAINER_APP_NAME -g $RESOURCE_GROUP"
-          exit 1
-
-      # Parar/eliminar la Container App no se hace aca: se maneja a mano con ScriptAz.java (menu 3).
-      - name: Logout from Azure
-        if: always()
-        run: az logout || true
+  ciclo:
+    needs: control
+    uses: ./.github/workflows/ciclo-azure.yml
+    with:
+      construir: true
+      desplegar: ${{ needs.control.outputs.desplegar == 'true' }}
+      apagar: ${{ needs.control.outputs.apagar == 'true' }}
+    secrets: inherit

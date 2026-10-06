@@ -1,0 +1,23 @@
+name: Apagar
+
+# Manual (Actions -> Apagar -> Run workflow): detiene la app, verifica que quede Stopped y borra
+# el ACR (que es lo unico que cobra por existir). Si el ACR ya no existe, no falla. La Container
+# App y el resource group no se borran: el proximo "Levantar" o push vuelve a crear el ACR.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-perfume
+  cancel-in-progress: false
+
+jobs:
+  ciclo:
+    uses: ./.github/workflows/ciclo-azure.yml
+    with:
+      construir: false
+      desplegar: false
+      apagar: true
+    secrets: inherit
