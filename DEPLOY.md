@@ -441,8 +441,8 @@ creado todo el día.
 ### Antes de presentar: Levantar
 
 1. GitHub → **Actions → Levantar → Run workflow** (rama `main`), **unos 15 minutos antes**.
-2. Tarda unos minutos (crear el ACR, build, Trivy, push, deploy y arranque). Termina en verde solo
-   si la prueba de humo vio `UP` con la imagen nueva.
+2. Tarda **unos 4 minutos y medio** (medido: 4 min 13 s y 4 min 16 s): crear el ACR, build, Trivy,
+   push, deploy y arranque. Termina en verde solo si la prueba de humo vio `UP` con la imagen nueva.
 3. Verificar:
    ```bash
    az containerapp show -n perfume-api -g rg-perfume --query properties.runningStatus -o tsv   # Running
@@ -452,8 +452,8 @@ creado todo el día.
 
 ### Después de presentar: Apagar
 
-GitHub → **Actions → Apagar → Run workflow**. Detiene la app, verifica `Stopped` y borra el ACR.
-También sirve si un run falló y dejó la app prendida o el ACR existiendo.
+GitHub → **Actions → Apagar → Run workflow**. Detiene la app, verifica `Stopped` y borra el ACR
+(medido: unos 45 segundos). También sirve si un run falló y dejó la app prendida o el ACR existiendo.
 
 Para comprobar que no queda nada cobrando:
 ```bash
@@ -486,6 +486,12 @@ manuales" desde cero. Después conviene borrar también el service principal
 - Pipeline completo en verde (run 37527971295, commit `471292b`): Trivy 0 vulnerabilidades HIGH/CRITICAL
   en la base Distroless y en `app.jar`; la revisión activa quedó con la imagen
   `parcial-ing-soft:471292bb…`, `Healthy`, y `/actuator/health` responde `UP`.
+- **Ciclo de costo cero probado (06/10/2026)**: push (`164fee6`, tag `v0.2.0`) → Levantar →
+  Apagar → Levantar → Apagar, todo en verde. Azure acepta el `update` con la app detenida, así que
+  el orden que quedó es **update → start**. El nombre del ACR se pudo reutilizar en el primer
+  intento incluso 30 segundos después de borrarlo, y la app tomó cada vez las credenciales nuevas.
+  Con la app levantada: health `UP`, `/api/perfumes` 200, login del admin con token y
+  `/actuator/metrics` 401 sin token y 200 con token. "Apagar" con el ACR ya borrado no falla.
 - Spring Boot 4.0.5 tenía 58 dependencias vulnerables (Spring, Tomcat y Spring Security) según
   Dependency-Check; se subió a Spring Boot 4.1.1 y se migró a Jackson 3.
 
