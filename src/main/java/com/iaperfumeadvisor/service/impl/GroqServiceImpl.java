@@ -1,7 +1,8 @@
 package com.iaperfumeadvisor.service.impl;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.iaperfumeadvisor.ai.PreferenceCriteria;
 import com.iaperfumeadvisor.dto.request.client.ChatHistoryItem;
 import com.iaperfumeadvisor.enums.GenderType;
@@ -246,7 +247,7 @@ public class GroqServiceImpl implements GroqService {
                     .referencesSpecificPerfume(node.path("referencesSpecificPerfume").asBoolean(false))
                     .build();
 
-        } catch (IOException ex) {
+        } catch (JacksonException ex) {
             throw new BusinessException("No se pudo interpretar el json de criterios que devolvio Groq", ex);
         }
     }
