@@ -19,19 +19,132 @@ y la despliega en Azure Container Apps cada vez que se hace push a `main`
   `/actuator/metrics` (requieren login admin). Trazas por request: header `X-Request-Id` y
   duración en los logs.
 
+## Ubicación de la configuración
+
+Las clases de configuración de Spring están en `src/main/java/com/iaperfumeadvisor/config/`
+(paquete `com.iaperfumeadvisor.config`), al mismo nivel que `controller`, `service`, etc.:
+`SecurityConfig`, `CorsConfig`, `WebMvcConfig`, `RequestTraceFilter`, `AdminUserInitializer` y
+`GroqWarmupInitializer`. Antes estaban en `controller/config/` con paquetes mezclados.
+
+Los valores (claves, contraseñas, URLs) no están en el código: salen de variables de entorno.
+La lista completa está en `.env.example`. El perfil de desarrollo local tiene su plantilla en
+`src/main/resources/application-dev.properties.example`; el archivo real está en `.gitignore`.
+
 ## Pipeline (`deploy.yml`)
 
 Un solo job, en este orden:
 
 1. **Verifica los secretos**: si falta alguno (o `ACR_NAME` trae `.azurecr.io`), falla con un mensaje claro.
-2. **Login en Azure** con `AZURE_CREDENTIALS` y **login en el ACR** con `az acr login`.
-3. **Construye** la imagen con dos tags: el SHA del commit y `latest`.
-4. **Escanea** la imagen con Trivy: falla si hay CVEs HIGH o CRITICAL que ya tengan parche. Se
+2. **Lee el mensaje del commit** para ver si trae `/deploy` o `/notdeploy` (ver abajo).
+3. **Login en Azure** con `AZURE_CREDENTIALS` y **login en el ACR** con `az acr login`.
+4. **Construye** la imagen con dos tags (el SHA del commit y `latest`) y etiquetas OCI: título,
+   versión, fecha, commit, repo y descripción (`docker inspect` las muestra).
+5. **Escanea** la imagen con Trivy: falla si hay CVEs HIGH o CRITICAL que ya tengan parche. Se
    escanea antes del push, así una imagen vulnerable nunca llega al registry.
-5. **Sube** la imagen al ACR.
-6. **Despliega** con `az containerapp update --image <acr>/parcial-ing-soft:<sha>`.
-7. **Prueba de humo**: espera a que la revisión activa tenga la imagen nueva y esté `Healthy`, y a
+6. **Sube** la imagen al ACR.
+7. **Despliega** con `az containerapp update --image <acr>/parcial-ing-soft:<sha>`.
+8. **Prueba de humo**: espera a que la revisión activa tenga la imagen nueva y esté `Healthy`, y a
    que `/actuator/health` responda `UP` (10 intentos cada 15 segundos).
+9. **Logout de Azure** (`az logout`), siempre, aunque haya fallado un paso anterior.
+
+No usa `azure/container-apps-deploy-action` (como el proyecto de referencia) porque esa action
+crea el entorno en otra región y modo; el nuestro es **Express en `chilecentral`**, y con
+`az containerapp update` se actualiza la app existente sin tocar el entorno.
+
+### Controles por mensaje de commit: `/deploy` y `/notdeploy`
+
+| Mensaje del commit contiene | Construye, escanea y sube | Despliega |
+|---|---|---|
+| (nada especial) | sí | sí, la imagen recién construida |
+| `/notdeploy` | sí | **no** |
+| `/deploy` | **no** | sí, la última imagen publicada (`:latest`) |
+
+Ejemplos: `git commit -m "docs: corregir README /notdeploy"` o
+`git commit --allow-empty -m "chore: redesplegar /deploy"`.
+
+Con `/deploy`, el pipeline busca en el ACR el digest de `parcial-ing-soft:latest` y despliega
+`<acr>/parcial-ing-soft@sha256:...`. Así siempre se crea una revisión nueva (aunque la app ya
+estuviera en `:latest`) y la prueba de humo sabe exactamente qué imagen tiene que estar corriendo.
+
+El mensaje del commit se pasa al script como variable de entorno (`COMMIT_MSG`), nunca
+interpolado: si alguien escribiera `$(comando)` en un commit, no se ejecuta.
+
+## Versionado automático (`versioning.yml`)
+
+Copiado tal cual del proyecto de referencia. En cada push a `main` crea un tag `vX.Y.Z` según el
+prefijo del commit ([Conventional Commits](https://www.conventionalcommits.org/)):
+
+| Prefijo del commit | Cambio de versión | Ejemplo |
+|---|---|---|
+| `feat!:` o `BREAKING CHANGE:` en el cuerpo | major: v1.2.3 → **v2.0.0** | cambio incompatible de la API |
+| `feat:` / `feat(scope):` | minor: v1.2.3 → v1.**3**.0 | funcionalidad nueva |
+| `fix:` / `refactor:` | patch: v1.2.3 → v1.2.**4** | corrección |
+| `docs:`, `chore:`, `ci:` u otro | sin tag | |
+
+Si todavía no hay ningún tag, parte de `v0.0.0`. Los tags se ven en GitHub → *Tags* o con
+`git fetch --tags && git tag`.
+
+## Correr en local con Docker Compose
+
+```bash
+cp .env.example .env      # completar JWT_SECRET, GROQ_API_KEY y ADMIN_PASSWORD
+docker compose up --build # construye la imagen (mismo Dockerfile que el pipeline) y la levanta
+curl http://localhost:8080/actuator/health
+docker compose logs -f    # logs
+docker compose down       # frenar y borrar el contenedor
+```
+
+`docker-compose.yml` levanta un solo servicio (`perfume-api`) en el puerto 8080 con el perfil
+`cloud` (H2 en memoria) y las variables del `.env`. Ojo: `env_file: .env` pasa **todas** las
+variables del archivo al contenedor, incluidas las de `ScriptAz.java` (credenciales del service
+principal). No es un problema en tu máquina, pero no conviene compartir ese contenedor ni su
+`docker inspect`.
+
+## Script de gestión (`ScriptAz.java`)
+
+Programa de consola en **Java** (un solo archivo, sin dependencias) que porta el `script_az.py`
+del proyecto de referencia, para manejar el ciclo de vida sin recordar los comandos de `az`.
+Necesita JDK 25, Docker Desktop, Azure CLI y un `.env` con las 4 credenciales del service
+principal (`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`;
+ver `.env.example`). No se compila con Gradle ni entra en la imagen: Java ejecuta el archivo directo.
+
+```bash
+java ScriptAz.java             # usa el .env de la carpeta
+java ScriptAz.java .env.prod   # otro archivo
+```
+
+Al arrancar verifica Docker y Azure CLI, hace `az login` con el service principal y lista tus
+recursos (resource group, ACR, entorno y Container App) para que elijas con un número. Después
+pregunta nombre de imagen (`parcial-ing-soft`), tag y puerto (`8080`).
+
+| Opción | Qué hace | Comandos que usa |
+|---|---|---|
+| **1** Construir y subir | build local `linux/amd64` con etiquetas OCI, push (tag + `latest`) y verifica que el tag esté en el ACR | `docker build`, `az acr login`, `docker push`, `az acr repository show-tags` |
+| **2** Deploy | si la app no existe la crea; si existe actualiza imagen, CPU, memoria y réplicas. Si estaba detenida la inicia. Muestra la URL | `az containerapp create/update`, `az containerapp registry set` |
+| **3a** Parar | detiene la app (no consume créditos) y espera `Stopped` | `az rest .../stop?api-version=2026-07-01` |
+| **3b** Iniciar | la vuelve a levantar y espera `Running` | `az rest .../start?api-version=2026-07-01` |
+| **3c** Listar | tabla con nombre, estado, CPU, memoria, réplicas y URL de las apps del grupo | `az containerapp list` |
+| **3d** Eliminar | borra una app (pide confirmación; es irreversible) | `az containerapp delete` |
+| **4** Pull | baja la imagen del ACR y ofrece correrla en local (con `--env-file .env`) | `docker pull`, `docker run` |
+| **5** Logs | logs de la consola en vivo; **Enter** vuelve al menú | `az containerapp logs show --follow` |
+| **6** Reconfigurar | vuelve a elegir los recursos | `az group/acr/containerapp list` |
+| **0** Salir | ofrece cerrar la sesión de Azure CLI | `az logout` |
+
+Diferencias con el `script_az.py` original:
+
+- Está en Java, como el resto del proyecto.
+- Puerto por defecto 8080 (no 3000), imagen `parcial-ing-soft` y api-version `2026-07-01` en
+  parar/iniciar (la que se probó con nuestra app).
+- En los logs se vuelve al menú con **Enter** y no con Ctrl+C: en Java, Ctrl+C cierra todo el
+  programa.
+- En el pull, `docker run` agrega `--env-file .env`: nuestra app no arranca sin `JWT_SECRET` y
+  `GROQ_API_KEY`.
+
+**Ojo con la opción 0:** `az logout` cierra la sesión de Azure CLI de la máquina, también la tuya
+personal si es la misma. Además, el login del script reemplaza la cuenta activa de `az`. Para no
+pisar tu sesión, correrlo con una carpeta de sesión aparte:
+`AZURE_CONFIG_DIR=$HOME/.azure-script java ScriptAz.java` (PowerShell:
+`$env:AZURE_CONFIG_DIR="$HOME\.azure-script"; java ScriptAz.java`).
 
 ## Secretos de GitHub
 

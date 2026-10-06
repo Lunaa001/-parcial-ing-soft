@@ -52,3 +52,6 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Python (como en el proyecto de referencia) ###
+__pycache__/

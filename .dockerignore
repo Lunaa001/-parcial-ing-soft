@@ -1,4 +1,5 @@
 .git
+.gitignore
 .gradle
 build
 .idea
@@ -7,3 +8,12 @@ uploads
 *.log
 .env
 .env.*
+Dockerfile
+.dockerignore
+*.md
+ScriptAz.java
+docker-compose.yml
+.github
+# Configuracion local con valores reales: nunca dentro de la imagen
+src/main/resources/application-dev.properties
+src/main/resources/application-local.properties

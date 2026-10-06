@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    container_name: perfume-api
+    ports:
+      - "8080:8080"
+    # Variables de la app (JWT_SECRET, GROQ_API_KEY, ADMIN_PASSWORD, ...). Copiar .env.example a .env.
+    env_file: .env
+    environment:
+      SPRING_PROFILES_ACTIVE: cloud
+    restart: unless-stopped

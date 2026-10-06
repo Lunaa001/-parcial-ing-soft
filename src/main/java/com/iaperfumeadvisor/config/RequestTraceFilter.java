@@ -1,4 +1,4 @@
-package com.iaperfumeadvisor.controller.config;
+package com.iaperfumeadvisor.config;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
