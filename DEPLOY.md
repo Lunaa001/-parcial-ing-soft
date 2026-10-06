@@ -241,6 +241,26 @@ Si falta alguno de GitHub, el primer paso del pipeline lo avisa con su nombre.
   El reporte queda en `build/reports/dependency-check-report.html`. El analizador OSS Index está
   desactivado porque exige credenciales.
 
+### Versiones parcheadas a mano en `build.gradle`
+
+El primer run del pipeline nuevo encontró con Trivy 13 CVEs (3 CRITICAL, 10 HIGH) en versiones que
+trae Spring Boot 4.1.1, que es la última publicada. Como no hay un Spring Boot nuevo con los
+arreglos, se pisan las versiones con las propiedades del BOM de Spring Boot:
+
+| Propiedad | Spring Boot 4.1.1 trae | Se fija en | CVEs que arregla |
+|---|---|---|---|
+| `tomcat.version` | 11.0.24 | 11.0.26 | CVE-2026-65182, CVE-2026-65905, CVE-2026-68525 (CRITICAL) |
+| `jackson-bom.version` (Jackson 3) | 3.1.5 | 3.1.7 | CVE-2026-89407, -89425, -68497, -91776, -91777 (HIGH) |
+| `jackson-2-bom.version` (Jackson 2, lo usa `jjwt-jackson`) | 2.21.5 | 2.21.7 | los mismos 5 de Jackson (HIGH) |
+
+Son parches dentro de la misma línea (11.0.x, 3.1.x, 2.21.x), por eso el riesgo de romper algo es
+bajo. Se probó el contenedor con el perfil cloud: health, `/api/perfumes`, login del admin con JWT
+y `/actuator/metrics` con el token.
+
+**Hay que sacar estas 3 líneas** cuando se suba a una versión de Spring Boot que ya traiga estas
+versiones o superiores (se ve en `spring-boot-dependencies-<version>.pom`, en Maven Central). Si se
+dejan, podrían quedar fijadas versiones más viejas que las que traería el Spring Boot nuevo.
+
 ## Estado real del despliegue (lo que se probó)
 
 - Región: `chilecentral` (la política de la suscripción de estudiante solo permite

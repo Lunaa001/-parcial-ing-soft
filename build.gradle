@@ -18,6 +18,12 @@ repositories {
 	mavenCentral()
 }
 
+// Parches de seguridad sobre las versiones de Spring Boot 4.1.1 (CVEs detectados por Trivy).
+// Sacar cuando una version nueva de Spring Boot ya traiga estas versiones o superiores.
+ext['tomcat.version'] = '11.0.26'
+ext['jackson-bom.version'] = '3.1.7'
+ext['jackson-2-bom.version'] = '2.21.7'
+
 dependencies {
 
 	// WEB
