@@ -97,3 +97,24 @@ az containerapp update -n $APP -g $RG --min-replicas 1 --max-replicas 1
 
 Las variables y secretos de GitHub y de Azure no se copian solos: hay que cargarlos a mano en el
 nuevo repo y en la nueva Container App, como en los pasos 5 y 6.
+
+## Estado real del despliegue (lo que se probó)
+
+- Región: `chilecentral` (la política de la suscripción de estudiante solo permite
+  newzealandnorth, mexicocentral, southafricanorth, chilecentral y northcentralus).
+- Entorno Container Apps **Express**: no admite identidad administrada ni sufijos de revisión.
+  El registry usa usuario administrador (credenciales guardadas como secretos).
+- `az acr build` no funciona en `chilecentral`: la imagen se construye en GitHub Actions y se sube con Docker.
+- Health check en producción: `https://<fqdn>/actuator/health` responde `UP`.
+
+## Limitaciones
+
+- **Despliegue automático**: la suscripción de estudiante bloquea `az ad sp create-for-rbac` y la asignación
+  de roles (error `MissingSubscription`). El job `deploy` del workflow necesita un secreto
+  `AZURE_CREDENTIALS` que hay que crear desde una cuenta con permisos de administrador de Entra ID.
+  Mientras tanto, la imagen se publica sola en el registry y la Container App se actualiza a mano con
+  `az containerapp update --image <registry>/parcial-ing-soft:<tag>`.
+- **Auditoria de CVEs**: `./gradlew dependencyCheckAnalyze` falla sin API key de NVD. Requiere una
+  API key gratuita de NVD (nvd.nist.gov) cargada en la propiedad `nvdApiKey` o en la variable de entorno
+  `NVD_API_KEY`.
+- **Base de datos y archivos**: H2 en memoria y `/tmp/uploads`, ambos efimeros.
