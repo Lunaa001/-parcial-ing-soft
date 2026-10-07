@@ -1080,6 +1080,14 @@ public class ScriptAz {
                 logErr("La app '" + config.appName + "' no existe");
                 return false;
             }
+            // Los entornos Express no dan endpoint de streaming (az containerapp logs show falla con
+            // KeyError 'eventStreamEndpoint'): en ese caso se leen los logs de Log Analytics.
+            Result endpoint = runCmd(List.of("az", "containerapp", "show", "--name", config.appName,
+                    "--resource-group", config.resourceGroup,
+                    "--query", "properties.eventStreamEndpoint", "-o", "tsv"), 30);
+            if (endpoint.code() != 0 || endpoint.out().isEmpty()) {
+                return logsFromLogAnalytics();
+            }
             int code = runStreamUntilEnter(List.of("az", "containerapp", "logs", "show",
                     "--name", config.appName, "--resource-group", config.resourceGroup,
                     "--type", "console", "--format", "text", "--follow"));
@@ -1092,6 +1100,81 @@ public class ScriptAz {
                 return false;
             }
             return true;
+        }
+
+        /**
+         * Logs de consola desde Log Analytics (tabla ContainerAppConsoleLogs_CL), consultando cada
+         * 10 segundos hasta que el usuario presione Enter. Azure tarda unos minutos en cargar cada
+         * linea en Log Analytics, asi que no es tiempo real. Usa la API REST con az rest (no hace
+         * falta la extension log-analytics de az); el cuerpo va en un archivo temporal para que
+         * cmd.exe no interprete los "|" de la consulta en Windows.
+         */
+        boolean logsFromLogAnalytics() {
+            Result ws = runCmd(List.of("az", "containerapp", "env", "show", "--name", config.environment,
+                    "--resource-group", config.resourceGroup,
+                    "--query", "properties.appLogsConfiguration.logAnalyticsConfiguration.customerId", "-o", "tsv"), 30);
+            if (ws.code() != 0 || ws.out().isEmpty()) {
+                logErr("El entorno no tiene streaming de logs ni un workspace de Log Analytics configurado");
+                return false;
+            }
+            logWarn("Este entorno (Express) no tiene streaming en vivo: se leen los logs de Log Analytics,");
+            logWarn("que los recibe con unos minutos de demora. Se consulta cada 10 segundos.");
+            OUT.println(Color.DIM + "─".repeat(60) + Color.RESET);
+
+            String desde = "ago(15m)";
+            boolean primera = true;
+            try {
+                Path body = Files.createTempFile("scriptaz-logs", ".json");
+                try {
+                    while (true) {
+                        String kql = "ContainerAppConsoleLogs_CL | where ContainerAppName_s == '" + config.appName
+                                + "' and TimeGenerated > " + desde
+                                + " | project TimeGenerated, Log_s | order by TimeGenerated desc | take "
+                                + (primera ? "30" : "200") + " | order by TimeGenerated asc";
+                        Files.writeString(body, "{\"query\": \"" + kql.replace("\"", "\\\"") + "\"}");
+                        Result r = runCmd(List.of("az", "rest", "--method", "post",
+                                "--url", "https://api.loganalytics.io/v1/workspaces/" + ws.out() + "/query",
+                                "--resource", "https://api.loganalytics.io",
+                                "--body", "@" + body,
+                                "--query", "tables[0].rows", "-o", "tsv"), 60);
+                        if (r.code() != 0) {
+                            logErr("No se pudo consultar Log Analytics (código " + r.code() + ")");
+                            return false;
+                        }
+                        for (String line : r.out().lines().toList()) {
+                            int tab = line.indexOf('\t');
+                            if (tab < 0) {
+                                continue;
+                            }
+                            String time = line.substring(0, tab);
+                            OUT.println(Color.DIM + time.replace('T', ' ').replaceAll("\\.\\d+Z$", "Z") + Color.RESET
+                                    + "  " + line.substring(tab + 1));
+                            desde = "datetime(" + time + ")";
+                        }
+                        if (primera && r.out().isEmpty()) {
+                            logInfo("Sin logs en los últimos 15 minutos — esperando líneas nuevas...");
+                        }
+                        primera = false;
+                        // 10 segundos entre consultas, mirando cada 200 ms si el usuario presiono Enter
+                        for (int i = 0; i < 50; i++) {
+                            if (IN.ready()) {
+                                IN.readLine();
+                                OUT.println("  " + Color.info("→") + " Logs finalizados — volviendo al menú");
+                                return true;
+                            }
+                            Thread.sleep(200);
+                        }
+                    }
+                } finally {
+                    Files.deleteIfExists(body);
+                }
+            } catch (IOException e) {
+                logErr("Error leyendo los logs: " + e.getMessage());
+                return false;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return true;
+            }
         }
     }
 

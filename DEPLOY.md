@@ -39,7 +39,7 @@ La lista completa está en `.env.example`. El perfil de desarrollo local tiene s
 
 | Workflow | Cuándo corre | Qué hace | Cómo queda |
 |---|---|---|---|
-| `deploy.yml` (CI/CD) | push a `main` (salvo si solo cambian `.md`) o *Run workflow* | build → Trivy → crea el ACR → push → deploy → prueba de humo → **apaga** | app detenida, ACR borrado |
+| `deploy.yml` (CI/CD) | push a `main` (salvo si solo cambian `.md`, `ScriptAz.java` o `.env.example`, que no entran en la imagen) o *Run workflow* | build → Trivy → crea el ACR → push → deploy → prueba de humo → **apaga** | app detenida, ACR borrado |
 | `levantar.yml` (**Levantar**) | solo manual (*Run workflow*) | lo mismo, pero **no apaga** | app prendida, ACR existiendo |
 | `apagar.yml` (**Apagar**) | solo manual | detiene la app, verifica `Stopped` y borra el ACR (si ya no existe, no falla) | app detenida, ACR borrado |
 | `versioning.yml` | push a `main` | crea el tag `vX.Y.Z` | — |
@@ -160,7 +160,7 @@ pregunta nombre de imagen (`parcial-ing-soft`), tag y puerto (`8080`).
 | **3c** Listar | tabla con nombre, estado, CPU, memoria, réplicas y URL de las apps del grupo | `az containerapp list` |
 | **3d** Eliminar | borra una app (pide confirmación; es irreversible) | `az containerapp delete` |
 | **4** Pull | baja la imagen del ACR y ofrece correrla en local (con `--env-file .env`) | `docker pull`, `docker run` |
-| **5** Logs | logs de la consola en vivo; **Enter** vuelve al menú | `az containerapp logs show --follow` |
+| **5** Logs | logs de la consola; **Enter** vuelve al menú. En Express los lee de Log Analytics cada 10 s (llegan con unos minutos de demora) | `az containerapp logs show --follow` o, en Express, `az rest` a la API de Log Analytics |
 | **6** Reconfigurar | vuelve a elegir los recursos | `az group/acr/containerapp list` |
 | **0** Salir | ofrece cerrar la sesión de Azure CLI | `az logout` |
 
@@ -179,6 +179,12 @@ Diferencias con el `script_az.py` original:
   parar/iniciar (la que se probó con nuestra app).
 - En los logs se vuelve al menú con **Enter** y no con Ctrl+C: en Java, Ctrl+C cierra todo el
   programa.
+- **Logs en Express:** `az containerapp logs show` falla en nuestro entorno con
+  `KeyError: 'eventStreamEndpoint'` (Express no da endpoint de streaming en vivo). Si la app no
+  tiene ese endpoint, la opción 5 consulta la tabla `ContainerAppConsoleLogs_CL` del Log Analytics
+  del entorno cada 10 segundos, con la API REST (`az rest`, sin extensiones). Muestra las últimas
+  30 líneas de los últimos 15 minutos y después las nuevas a medida que llegan, con unos minutos
+  de demora.
 - En el pull, `docker run` agrega `--env-file .env`: nuestra app no arranca sin `JWT_SECRET` y
   `GROQ_API_KEY`.
 
@@ -338,8 +344,21 @@ az containerapp show -n $APP -g $RG --query properties.runningStatus -o tsv
 az containerapp revision list -n $APP -g $RG -o table      # imagen y estado (Healthy) de la revisión
 az containerapp show -n $APP -g $RG --query properties.configuration.ingress.fqdn -o tsv
 curl https://<fqdn>/actuator/health                         # debe devolver {"status":"UP"}
-az containerapp logs show -n $APP -g $RG --follow           # logs en vivo (con requestId por request)
 ```
+
+**Logs:** `az containerapp logs show` **no funciona en el entorno Express** (falla con
+`KeyError: 'eventStreamEndpoint'`). Los logs de la app se guardan en Log Analytics, con unos
+minutos de demora, y se consultan así (necesita la extensión `log-analytics`:
+`az extension add -n log-analytics`), o con la opción 5 de `ScriptAz.java`:
+
+```bash
+WS=$(az containerapp env show -n perfume-env -g rg-perfume \
+  --query properties.appLogsConfiguration.logAnalyticsConfiguration.customerId -o tsv)
+az monitor log-analytics query -w $WS -o table --analytics-query \
+  "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'perfume-api' | project TimeGenerated, Log_s | order by TimeGenerated desc | take 20"
+```
+
+Cada request aparece con su `requestId`, método, ruta, código y duración (`RequestTraceFilter`).
 
 ## Detener e iniciar la aplicación
 

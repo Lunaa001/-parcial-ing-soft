@@ -9,8 +9,8 @@ name: CI/CD - construir, escanear, desplegar y apagar
 on:
   push:
     branches: [main]
-    # Un commit que solo cambia documentacion no levanta la app ni crea el ACR
-    paths-ignore: ['**.md']
+    # Cambios que no entran en la imagen (docs, script de consola, plantilla de variables) no levantan la app
+    paths-ignore: ['**.md', 'ScriptAz.java', '.env.example']
   workflow_dispatch:
 
 permissions:

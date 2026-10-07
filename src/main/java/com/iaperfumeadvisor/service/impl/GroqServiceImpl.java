@@ -37,11 +37,11 @@ public class GroqServiceImpl implements GroqService {
     @Value("${groq.api-key:}")
     private String apiKey;
 
-    @Value("${groq.model:groq/compound}")
+    @Value("${groq.model:qwen/qwen3.8-27b}")
     private String model;
 
     // Modelo de texto plano (sin busqueda agentica) para cuando ademas hay que razonar contra
-    // varios productos del catalogo: groq/compound ahi a veces dispara varias busquedas internas
+    // varios productos del catalogo: el modelo principal (antes groq/compound) ahi a veces disparaba busquedas internas
     // (una por cada perfume que compara) y se pasa del limite de tokens por pedido del plan gratis.
     @Value("${groq.fallback-model:openai/gpt-oss-120b}")
     private String fallbackModel;
