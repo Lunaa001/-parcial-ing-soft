@@ -72,10 +72,11 @@ del todo:
 
 | Workflow | Cuándo corre | Qué hace | Cómo queda |
 |---|---|---|---|
-| `deploy.yml` (CI/CD) | push a `main` (salvo si solo cambian `.md`, `ScriptAz.java` o `.env.example`, que no entran en la imagen) o *Run workflow* | build → Trivy → crea el ACR → push → deploy → prueba de humo → **apaga** | app detenida, ACR borrado |
+| `deploy.yml` (CI/CD) | push a `main` (salvo si solo cambian `.md`, `ScriptAz.java` o `.env.example`, que no entran en la imagen) o *Run workflow* | tests → build → Trivy + Grype → crea el ACR → push → deploy → prueba de humo → **apaga** | app detenida, ACR borrado |
 | `levantar.yml` (**Levantar**) | solo manual (*Run workflow*) | lo mismo, pero **no apaga** | app prendida, ACR existiendo |
 | `apagar.yml` (**Apagar**) | solo manual | detiene la app, verifica `Stopped` y borra el ACR (si ya no existe, no falla) | app detenida, ACR borrado |
 | `versioning.yml` | push a `main` | crea el tag `vX.Y.Z` | — |
+| `codeql.yml` (**CodeQL**) | push a `main`, PR y los lunes | análisis estático del código Java (GitHub code scanning) | resultados en *Security → Code scanning* |
 
 Los tres primeros usan la misma lógica, que está en `ciclo-azure.yml` (workflow reutilizable con
 tres interruptores: construir, desplegar y apagar), y comparten el grupo de `concurrency`
@@ -84,35 +85,40 @@ tres interruptores: construir, desplegar y apagar), y comparten el grupo de `con
 ### Pasos del ciclo (`ciclo-azure.yml`)
 
 1. **Verifica los secretos**: si falta alguno (o `ACR_NAME` trae `.azurecr.io`), falla con un mensaje claro.
-2. **Tests**: instala Java 25 (con caché de Gradle) y corre `./gradlew test` con el perfil `cloud`
+2. **Calcula la versión** (`vX.Y.Z`) con `.github/scripts/version.sh`, el mismo script que usa
+   `versioning.yml` (ver "Versionado automático").
+3. **Tests**: instala Java 25 (con caché de Gradle) y corre `./gradlew test` con el perfil `cloud`
    (H2) y valores de prueba para `JWT_SECRET` y `GROQ_API_KEY`, nunca los reales. Si un test falla,
    el pipeline se frena antes de construir y el ACR ni se crea (el reporte queda como artifact
    `reporte-tests` del run).
-3. **Login en Azure** con `AZURE_CREDENTIALS`.
-4. **Construye** la imagen con dos tags (el SHA del commit y `latest`) y etiquetas OCI: título,
-   versión, fecha, commit, repo y descripción (`docker inspect` las muestra).
-5. **Escanea** la imagen con Trivy: falla si hay CVEs HIGH o CRITICAL que ya tengan parche. El
-   build y Trivy no necesitan el ACR, así que si Trivy encuentra algo **el ACR ni se crea**.
-6. **Crea el ACR** si no existe: `rg-perfume`, misma región, Basic, usuario admin habilitado. El
+4. **Login en Azure** con `AZURE_CREDENTIALS`.
+5. **Construye** la imagen con **tres tags**: la versión (`v0.4.0`), el SHA del commit y `latest`.
+   Etiquetas OCI: título, `version` = vX.Y.Z, `revision` = SHA, fecha, repo y descripción.
+6. **Escanea** la imagen con **Trivy** y con **Grype**: cualquiera de los dos frena el pipeline si
+   encuentra CVEs HIGH o CRITICAL que ya tengan parche. Como no necesitan el ACR, si encuentran
+   algo **el ACR ni se crea**. Detalle en [docs/seguridad/vulnerabilidades.md](docs/seguridad/vulnerabilidades.md).
+7. **Crea el ACR** si no existe: `rg-perfume`, misma región, Basic, usuario admin habilitado. El
    nombre es global en Azure y recién borrado puede tardar en liberarse: reintenta hasta 10 minutos.
-7. **Sube** la imagen al ACR (`az acr login` + `docker push`).
-8. **Credenciales del registry**: lee la contraseña admin del ACR, la oculta del log
-   (`::add-mask::`) y la carga en la app con `az containerapp registry set`.
-9. **Despliega**: `az containerapp update --image <acr>/parcial-ing-soft:<sha>` y, si la app estaba
-   detenida, la inicia (`az rest .../start`). Va en ese orden (**update → start**) porque si se
-   prendiera antes, intentaría bajar la imagen anterior, que no existe en el ACR recreado. Si Azure
-   no aceptara el update con la app detenida, el paso usa start → update y lo avisa con un warning;
-   el orden usado queda en el resumen del run.
-10. **Prueba de humo**: espera a que la revisión activa tenga la imagen nueva y esté `Healthy`, y a
-    que `/actuator/health` responda `UP` (10 intentos cada 15 segundos).
-11. **Apaga** (solo `deploy.yml` y "Apagar"): detiene la app, verifica `runningStatus=Stopped` y
+8. **Sube** los tres tags al ACR (`az acr login` + `docker push --all-tags`).
+9. **Credenciales**: lee la contraseña admin del ACR y la connection string de Application
+   Insights, las oculta del log (`::add-mask::`) y las carga en la app (`az containerapp registry
+   set` y el secreto `appinsights-cs`).
+10. **Despliega** la imagen **por versión**: `az containerapp update --image <acr>/parcial-ing-soft:vX.Y.Z`
+    con las variables `APP_VERSION`, `GIT_SHA`, `APPLICATIONINSIGHTS_CONNECTION_STRING=secretref:appinsights-cs`
+    y `APPLICATIONINSIGHTS_ROLE_NAME`. `GIT_SHA` fuerza una revisión nueva aunque la versión no
+    cambie (un commit `chore:` reusa el último tag). Si la app estaba detenida, la inicia después
+    (**update → start**: si se prendiera antes, intentaría bajar la imagen anterior, que no existe en
+    el ACR recreado). El orden usado queda en el resumen del run.
+11. **Prueba de humo**: espera a que la revisión activa tenga la imagen de esta versión **y** el
+    `GIT_SHA` de este commit, esté `Healthy`, y `/actuator/health` responda `UP` (10 intentos cada 15 s).
+12. **Apaga** (solo `deploy.yml` y "Apagar"): detiene la app, verifica `runningStatus=Stopped` y
     borra el ACR. Si hubo deploy, solo apaga si la prueba de humo pasó: si falló, la app queda
     prendida para revisar los logs, y después hay que correr "Apagar".
-12. **Limpieza**: si algo falla después de crear el ACR y antes de tocar la app (por ejemplo el
+13. **Limpieza**: si algo falla después de crear el ACR y antes de tocar la app (por ejemplo el
     push), borra ese ACR recién creado, porque no sirve para nada y cobra.
-13. **Logout de Azure** (`az logout`), siempre, aunque haya fallado un paso anterior.
+14. **Logout de Azure** (`az logout`), siempre, aunque haya fallado un paso anterior.
 
-    No usa `azure/container-apps-deploy-action` (como el proyecto de referencia) porque esa action
+No usa `azure/container-apps-deploy-action` (como el proyecto de referencia) porque esa action
     crea el entorno en otra región y modo; el nuestro es **Express en `chilecentral`**, y con
     `az containerapp update` se actualiza la app existente sin tocar el entorno.
 
@@ -142,7 +148,7 @@ limpiar imágenes viejas.
 
 ## Versionado automático (`versioning.yml`)
 
-Copiado tal cual del proyecto de referencia. En cada push a `main` crea un tag `vX.Y.Z` según el
+Basado en el del proyecto de referencia. En cada push a `main` crea un tag `vX.Y.Z` según el
 prefijo del commit ([Conventional Commits](https://www.conventionalcommits.org/)):
 
 | Prefijo del commit | Cambio de versión | Ejemplo |
@@ -154,6 +160,32 @@ prefijo del commit ([Conventional Commits](https://www.conventionalcommits.org/)
 
 Si todavía no hay ningún tag, parte de `v0.0.0`. Los tags se ven en GitHub → *Tags* o con
 `git fetch --tags && git tag`.
+
+**Diferencia con la referencia:** el cálculo se movió a `.github/scripts/version.sh` (la regla es
+idéntica), porque el pipeline también lo usa para **etiquetar la imagen con la versión**. Así
+`versioning.yml` y el pipeline calculan siempre la misma versión aunque corran al mismo tiempo:
+
+- si el commit ya tiene un tag (porque `versioning.yml` terminó antes, o en un re-run), los dos usan ese;
+- si no, los dos calculan el siguiente con la misma regla y el mismo último tag;
+- si el commit no sube versión (`docs:`, `chore:`) o el workflow se corrió a mano, se usa la última.
+
+Además, `versioning.yml` ya no crea un tag nuevo si el commit ya tiene uno (en la referencia, un
+re-run creaba otro).
+
+### Cómo se ve la imagen en el ACR
+
+Cada deploy sube la misma imagen con tres nombres:
+
+```
+acrperfume45184.azurecr.io/parcial-ing-soft:v0.4.0      <- la que se despliega
+acrperfume45184.azurecr.io/parcial-ing-soft:<sha>       <- el commit exacto
+acrperfume45184.azurecr.io/parcial-ing-soft:latest
+```
+
+```bash
+az acr repository show-tags -n acrperfume45184 --repository parcial-ing-soft -o table
+az containerapp show -n perfume-api -g rg-perfume --query "properties.template.containers[0].image" -o tsv
+```
 
 ## Correr en local con Docker Compose
 
@@ -311,7 +343,10 @@ MSYS_NO_PATHCONV=1 az role assignment create --assignee <clientId> \
 | Secreto (`jwt-secret`) | `JWT_SECRET` | clave para firmar los tokens (mínimo 256 bits). Obligatoria: sin ella la app no arranca |
 | Secreto (`groq-key`) | `GROQ_API_KEY` | key de Groq. Obligatoria: sin ella la app no arranca |
 | Secreto (`admin-pass`) | `ADMIN_PASSWORD` | contraseña del admin inicial |
-| Secreto (lo crea Azure) | registry | contraseña del usuario admin del ACR, para descargar la imagen |
+| Secreto (lo crea Azure) | registry | contraseña del usuario admin del ACR, para descargar la imagen. La recarga el pipeline en cada deploy |
+| Secreto (`appinsights-cs`) | `APPLICATIONINSIGHTS_CONNECTION_STRING` | connection string de Application Insights. **La carga el pipeline** en cada deploy, leyéndola del recurso `appi-perfume`; nunca va en el código ni en los `.properties` |
+| Variable (la pone el pipeline) | `APPLICATIONINSIGHTS_ROLE_NAME` | nombre de la app en el mapa de aplicación (`perfume-api`) |
+| Variable (la pone el pipeline) | `APP_VERSION`, `GIT_SHA` | versión y commit que corre la revisión |
 | Variable | `SPRING_PROFILES_ACTIVE` | `cloud` |
 | Variable | `ADMIN_USERNAME`, `ADMIN_EMAIL` | datos del admin inicial |
 | Variable (opcional) | `WHATSAPP_BUSINESS_NUMBER` | número para el link de pedido |
@@ -353,6 +388,14 @@ az containerapp update -n $APP -g $RG --set-env-vars \
   ADMIN_PASSWORD=secretref:admin-pass ADMIN_USERNAME=admin ADMIN_EMAIL=admin@ejemplo.com
 
 # 6. Service principal y secretos de GitHub: ver "Secretos de GitHub" más arriba
+
+# 7. Application Insights (monitoreo), sobre el Log Analytics que creó el entorno. No se borra al apagar.
+az provider register -n Microsoft.Insights --wait
+WSID=$(az monitor log-analytics workspace list -g $RG --query "[0].id" -o tsv)
+MSYS_NO_PATHCONV=1 az monitor app-insights component create --app appi-perfume -g $RG -l $LOC \
+  --kind web --application-type web --workspace "$WSID"
+# Tope diario de ingesta (0,15 GB): si algo se descontrola, deja de recibir datos en vez de cobrar
+az monitor log-analytics workspace update -g $RG -n <workspace> --quota 0.15
 ```
 
 ## Problema de Git Bash en Windows (`MissingSubscription`)
@@ -373,6 +416,50 @@ como `nonroot`, no puede crear carpetas dentro de `/app`). Se arregló borrando 
 
 Solución: en Git Bash usar siempre `MSYS_NO_PATHCONV=1 az ...` para comandos con rutas que empiezan
 con `/`, o usar PowerShell o Azure Cloud Shell, que no tienen este problema.
+
+## Monitoreo con Application Insights
+
+`appi-perfume` es un recurso **Application Insights en modo workspace**: guarda los datos en el mismo
+Log Analytics que ya usaba el entorno (`workspace-rgperfumeOfnB`), así que no suma un almacenamiento
+aparte. **No se borra con "Apagar"** (ese workflow solo toca la app y el ACR).
+
+**Cómo se integra:** con el **agente Java de Application Insights 3.7.10**, que es la Azure Monitor
+OpenTelemetry Distro para Java (por dentro es OpenTelemetry). Para Spring Boot en JVM es lo que
+recomienda Microsoft (el starter `spring-cloud-azure-starter-monitor` es para imágenes nativas GraalVM).
+
+- `build.gradle` declara el agente (configuración `appInsightsAgent`, fuera del classpath de la app).
+- El Dockerfile lo copia a la imagen y el `ENTRYPOINT` lo carga con `-javaagent`. Sigue siendo **un
+  solo proceso**: el agente corre dentro de la misma JVM.
+- No hace falta código: el agente captura solo **requests** (con su duración), **dependencias** (las
+  llamadas HTTP a `api.groq.com`), **excepciones**, **logs** y **métricas** de CPU y memoria.
+- La **connection string** la carga el pipeline como secreto de la Container App. Sin ella (por
+  ejemplo en docker compose local) el agente no envía nada y la app funciona igual.
+
+**Dónde mirar** (Portal → `appi-perfume`):
+
+| Pantalla | Qué muestra |
+|---|---|
+| *Investigate → Transaction search* / *Performance* | cada request (por ejemplo `POST /api/auth/login`) con su duración y código |
+| *Investigate → Application map* | `perfume-api` → `api.groq.com`, con cantidad de llamadas, duración y errores |
+| *Investigate → Failures* | excepciones y requests fallidas |
+| *Monitoring → Metrics* | CPU del proceso, memoria, requests por segundo, tiempos de respuesta |
+| *Monitoring → Logs* | consultas KQL sobre todo lo anterior |
+
+Las mismas consultas por línea de comandos (extensión `log-analytics`):
+
+```bash
+WS=$(az containerapp env show -n perfume-env -g rg-perfume --query properties.appLogsConfiguration.logAnalyticsConfiguration.customerId -o tsv)
+az monitor log-analytics query -w $WS -o table --analytics-query \
+  "AppRequests | where TimeGenerated > ago(1h) | project TimeGenerated, Name, ResultCode, DurationMs | order by TimeGenerated desc"
+az monitor log-analytics query -w $WS -o table --analytics-query \
+  "AppDependencies | where TimeGenerated > ago(1h) | summarize llamadas=count(), ms_promedio=avg(DurationMs) by Target, ResultCode"
+az monitor log-analytics query -w $WS -o table --analytics-query \
+  "AppPerformanceCounters | where TimeGenerated > ago(1h) | summarize avg(Value) by Name"
+```
+
+**Costo:** el recurso no cobra. La telemetría entra al workspace, cuyos primeros 5 GB por mes son
+gratis, y el workspace tiene un **tope de 0,15 GB por día**: si se llegara, deja de recibir datos
+hasta el día siguiente, en vez de cobrar.
 
 ## Verificar que el contenedor corre
 
@@ -442,7 +529,10 @@ Si falta alguno de GitHub, el primer paso del pipeline lo avisa con su nombre.
 ## Auditoría de CVEs
 
 - **En el pipeline**: Trivy escanea la imagen completa (jars de la app y base Distroless) en cada
-  push. El antes y el después (13 CVEs → 0) está en [docs/seguridad/trivy.md](docs/seguridad/trivy.md). No necesita API key. La action está fijada al commit `ed142fd…` (v0.36.0) y no a un tag,
+  push. Desde `v0.4.0` también escanea con **Grype**. El antes y el después y la comparación de
+  herramientas están en [docs/seguridad/vulnerabilidades.md](docs/seguridad/vulnerabilidades.md).
+- **CodeQL** (`codeql.yml`): análisis estático de nuestro código Java en cada push y PR. Alertas en
+  GitHub → *Security → Code scanning*. No necesita API key. La action está fijada al commit `ed142fd…` (v0.36.0) y no a un tag,
   porque en 2026 hubo un incidente en el que se modificaron tags de `trivy-action`.
 - **A mano** (OWASP Dependency-Check, solo dependencias Java): necesita una API key gratuita de
   NVD (nvd.nist.gov/developers/request-an-api-key), cargada solo como variable de entorno, nunca
@@ -487,7 +577,8 @@ dejan, podrían quedar fijadas versiones más viejas que las que traería el Spr
 | **Container Registry (ACR) Basic** | **sí, por existir** | ~USD 0,17 por día, proporcional a las horas, aunque no se use. No se puede detener: solo deja de cobrar si se borra. Por eso se crea al levantar y se borra al apagar |
 | Container App **detenida** | no | `Stopped` no consume CPU ni memoria |
 | Container App **prendida** | casi nada | entra en el cupo gratis mensual de Container Apps mientras se use poco |
-| Log Analytics (`workspace-rgperfume…`) | prácticamente no | lo usa el entorno para los logs; los primeros 5 GB por mes son gratis. Se deja |
+| Log Analytics (`workspace-rgperfume…`) | prácticamente no | lo usan el entorno (logs) y Application Insights (telemetría); los primeros 5 GB por mes son gratis y tiene **tope de 0,15 GB/día**. Se deja |
+| Application Insights (`appi-perfume`) | no | modo workspace: no cobra aparte, solo la ingesta del workspace (ver arriba). No se borra al apagar |
 | Entorno Container Apps, resource group | no | |
 
 **Con todo apagado (app detenida y ACR borrado), el gasto es cero.** Los USD 0,11 que aparecieron

@@ -73,6 +73,24 @@ tasks.named('bootJar') {
 	archiveFileName = 'ia-perfume-advisor.jar'
 }
 
+// Agente Java de Application Insights (Azure Monitor OpenTelemetry Distro para Java). No va en el
+// classpath de la app: se carga con -javaagent en el ENTRYPOINT del Dockerfile y manda requests,
+// dependencias (llamadas a Groq), excepciones, logs y metricas de CPU/memoria. Solo envia datos si
+// existe la variable APPLICATIONINSIGHTS_CONNECTION_STRING (secreto de la Container App).
+configurations {
+	appInsightsAgent
+}
+
+dependencies {
+	appInsightsAgent 'com.microsoft.azure:applicationinsights-agent:3.7.10'
+}
+
+tasks.register('copyAppInsightsAgent', Copy) {
+	from configurations.appInsightsAgent
+	into layout.buildDirectory.dir('agent')
+	rename { 'applicationinsights-agent.jar' }
+}
+
 dependencyCheck {
 	analyzers {
 		ossIndexEnabled = false

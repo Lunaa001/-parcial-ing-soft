@@ -96,13 +96,17 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun          # Windows: set SPRING_PROF
 - **Levantar / Apagar**: workflows manuales (Actions → *Run workflow*). "Levantar" despliega y deja
   la app prendida (para presentar, unos 15 minutos antes); "Apagar" la detiene y borra el registry.
 - **Costo**: con todo apagado es cero. Solo el registry cobra por existir (~USD 0,17 por día).
+- **Monitoreo**: Application Insights (`appi-perfume`) recibe requests, llamadas a Groq,
+  excepciones, logs y métricas de CPU/memoria mediante el agente Java (ver DEPLOY.md).
+- **Imagen versionada**: cada imagen lleva la versión (`v0.4.0`), el SHA del commit y `latest`; se
+  despliega por versión.
 - **Versionado automático**: cada push a `main` crea un tag `vX.Y.Z` según el prefijo del commit
   (`feat:` sube la Y, `fix:`/`refactor:` la Z, `!` o `BREAKING CHANGE:` la X).
 - **A mano**: `java ScriptAz.java` (menú para construir, desplegar, parar, iniciar, ver logs).
 
 Paso a paso y comandos: [DEPLOY.md](DEPLOY.md). Ahí también está cómo cumple el proyecto los
 **12 factores** (sección "Twelve-Factor"). El informe de vulnerabilidades (13 CVEs → 0) está en
-[docs/seguridad/trivy.md](docs/seguridad/trivy.md).
+[docs/seguridad/vulnerabilidades.md](docs/seguridad/vulnerabilidades.md).
 
 ## Variables y secretos
 

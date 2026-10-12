@@ -1,0 +1,40 @@
+name: CodeQL
+
+# Analisis estatico del codigo Java (GitHub code scanning). Busca vulnerabilidades en NUESTRO
+# codigo (inyecciones, validaciones faltantes, criptografia debil...), algo que Trivy y Grype no
+# hacen: ellos revisan dependencias e imagen. Los resultados aparecen en Security -> Code scanning.
+# Es gratis en repos publicos.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '23 6 * * 1' # lunes 06:23 UTC: detecta reglas nuevas aunque no haya commits
+
+permissions:
+  contents: read
+
+jobs:
+  analizar:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # para publicar los resultados en code scanning
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # Fijada por commit (v4.38.3), no por tag. build-mode none: analiza el codigo fuente sin
+      # compilar, asi no depende del toolchain de Java 25 ni de Gradle.
+      - name: Inicializar CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: java-kotlin
+          build-mode: none
+          queries: security-and-quality
+
+      - name: Analizar
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:java-kotlin

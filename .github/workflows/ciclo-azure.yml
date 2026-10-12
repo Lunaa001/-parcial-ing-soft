@@ -21,6 +21,9 @@ on:
 
 env:
   IMAGE_NAME: parcial-ing-soft
+  # Application Insights (modo workspace) creado una sola vez a mano en el resource group; no se
+  # borra al apagar. Si no existe, el deploy sigue sin telemetria y avisa con un warning.
+  APPINSIGHTS_NAME: appi-perfume
 
 jobs:
   ciclo:
@@ -49,8 +52,24 @@ jobs:
           echo "Modo: construir=${{ inputs.construir }} desplegar=${{ inputs.desplegar }} apagar=${{ inputs.apagar }}"
           exit $faltan
 
+      # Historial completo y tags: hacen falta para calcular la version (ultimo vX.Y.Z)
       - uses: actions/checkout@v7
         if: inputs.construir
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      # Misma regla y mismo script que versioning.yml, asi la imagen y el tag de git coinciden
+      - name: Calcular la version semantica
+        id: version
+        if: inputs.construir
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          bash .github/scripts/version.sh
+          VERSION=$(grep '^version=' "$GITHUB_OUTPUT" | tail -n1 | cut -d= -f2)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "### Version: $VERSION (commit ${GITHUB_SHA::7})" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Instalar Java 25 (con cache de Gradle)
         if: inputs.construir
@@ -84,19 +103,20 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # El build y Trivy no necesitan el ACR: si Trivy encuentra un CVE, el ACR ni se crea.
-      # Etiquetas OCI (las mismas que pone ScriptAz.java): quedan grabadas en la imagen.
+      # El build y los escaneos no necesitan el ACR: si Trivy o Grype encuentran un CVE, el ACR ni
+      # se crea. Tres tags: version (la que se despliega), SHA del commit y latest. Etiquetas OCI
+      # (las mismas que pone ScriptAz.java): version = vX.Y.Z, revision = SHA del commit.
       - name: Construir la imagen (Distroless, multi-stage)
         if: inputs.construir
         run: |
           docker build \
             --label "org.opencontainers.image.title=$IMAGE_NAME" \
-            --label "org.opencontainers.image.version=${{ github.sha }}" \
+            --label "org.opencontainers.image.version=$VERSION" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --label "org.opencontainers.image.revision=${{ github.sha }}" \
             --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
             --label "org.opencontainers.image.description=App $IMAGE_NAME - Azure Container Apps" \
-            -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+            -t "$IMAGE:$VERSION" -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
 
       # Fijada por commit (v0.36.0), no por tag, para que nadie pueda cambiar el codigo que corre.
       - name: Escanear la imagen con Trivy (CVEs HIGH/CRITICAL con parche)
@@ -110,6 +130,18 @@ jobs:
           ignore-unfixed: true
           format: table
           exit-code: '1'
+
+      # Segundo escaner (otra base de vulnerabilidades) sobre la misma imagen, con el mismo criterio.
+      # Fijado por commit (v7.4.2), no por tag.
+      - name: Escanear la imagen con Grype (CVEs HIGH/CRITICAL con parche)
+        if: inputs.construir
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: ${{ env.IMAGE }}:${{ github.sha }}
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
 
       # Basic + usuario admin (el entorno Express no admite identidad administrada para el pull).
       # El nombre es global en Azure: recien borrado puede tardar en liberarse, por eso los reintentos.
@@ -140,11 +172,12 @@ jobs:
         if: inputs.construir
         run: |
           az acr login --name "$ACR_NAME"
-          docker push "$IMAGE:${{ github.sha }}"
-          docker push "$IMAGE:latest"
+          docker push --all-tags "$IMAGE"
+          echo "### Imagen: $IMAGE con tags $VERSION, ${GITHUB_SHA::7}... y latest" >> "$GITHUB_STEP_SUMMARY"
 
-      # La contrasena admin cambia cada vez que se recrea el ACR: se vuelve a cargar en la app.
-      - name: Aplicar las credenciales del ACR en la Container App
+      # La contrasena admin cambia cada vez que se recrea el ACR: se vuelve a cargar en la app. La
+      # connection string de Application Insights se sincroniza como secreto (nunca en el codigo).
+      - name: Aplicar credenciales del ACR y de Application Insights en la Container App
         if: inputs.desplegar
         run: |
           echo "APP_TOCADA=true" >> "$GITHUB_ENV"
@@ -157,6 +190,17 @@ jobs:
             --username "$ACR_NAME" \
             --password "$PASSWORD" \
             --output none
+          CS=$(az resource show --resource-group "$RESOURCE_GROUP" --name "$APPINSIGHTS_NAME" \
+                 --resource-type microsoft.insights/components --query properties.ConnectionString -o tsv 2>/dev/null || true)
+          if [ -n "$CS" ]; then
+            echo "::add-mask::$CS"
+            az containerapp secret set --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
+              --secrets "appinsights-cs=$CS" --output none
+            echo "APPINSIGHTS_ENV=APPLICATIONINSIGHTS_CONNECTION_STRING=secretref:appinsights-cs APPLICATIONINSIGHTS_ROLE_NAME=$CONTAINER_APP_NAME" >> "$GITHUB_ENV"
+            echo "Connection string de Application Insights cargada como secreto appinsights-cs."
+          else
+            echo "::warning::No existe Application Insights '$APPINSIGHTS_NAME' en $RESOURCE_GROUP: se despliega sin telemetria."
+          fi
 
       # Orden update -> start: si se prendiera antes, la app intentaria bajar la imagen vieja, que no
       # existe en el ACR recreado. Si Azure no acepta el update con la app detenida, start -> update.
@@ -170,9 +214,14 @@ jobs:
             for i in $(seq 1 24); do [ "$(estado)" = "Running" ] && return 0; sleep 5; done
             echo "::warning::La app todavia no figura Running; la prueba de humo sigue esperando."
           }
+          # APP_VERSION y GIT_SHA dejan visible que codigo corre y fuerzan una revision nueva aunque la
+          # version no cambie (un commit chore: reusa el ultimo tag)
           actualizar() {
+            # shellcheck disable=SC2086
             az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
-              --image "$IMAGE:${{ github.sha }}" --output none
+              --image "$IMAGE:$VERSION" \
+              --set-env-vars APP_VERSION="$VERSION" GIT_SHA="${{ github.sha }}" $APPINSIGHTS_ENV \
+              --output none
           }
           INICIAL=$(estado)
           echo "Estado inicial de la app: $INICIAL"
@@ -194,7 +243,8 @@ jobs:
           echo "### Orden de despliegue: $ORDEN (estado inicial: $INICIAL)" >> "$GITHUB_STEP_SUMMARY"
 
       # Despues del update la revision nueva puede responder 503 mientras arranca. Ademas se exige
-      # que la revision activa ya tenga la imagen de este commit, para no aceptar el UP de la vieja.
+      # que la revision activa ya tenga la imagen de esta version Y el GIT_SHA de este commit, para no
+      # aceptar el UP de la revision vieja (que puede tener la misma version si el commit no la subio).
       - name: Prueba de humo (/actuator/health)
         id: humo
         if: inputs.desplegar
@@ -203,17 +253,17 @@ jobs:
             --query properties.configuration.ingress.fqdn -o tsv)
           for intento in $(seq 1 10); do
             estado=$(az containerapp revision list --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
-              --query "[?properties.active && properties.template.containers[0].image=='$IMAGE:${{ github.sha }}'].properties.healthState | [0]" -o tsv)
+              --query "[?properties.active && properties.template.containers[0].image=='$IMAGE:$VERSION' && properties.template.containers[0].env[?name=='GIT_SHA' && value=='${{ github.sha }}'] | [0].value == '${{ github.sha }}'].properties.healthState | [0]" -o tsv)
             codigo=$(curl -s -o respuesta.json -w '%{http_code}' "https://$FQDN/actuator/health" || true)
             echo "Intento $intento/10: revision con la imagen nueva=${estado:-todavia no} | HTTP $codigo $(cat respuesta.json 2>/dev/null)"
             if [ "$estado" = "Healthy" ] && [ "$codigo" = "200" ] && grep -q '"UP"' respuesta.json; then
-              echo "La app responde UP en https://$FQDN con la imagen ${{ github.sha }}"
+              echo "La app responde UP en https://$FQDN con la imagen $VERSION (${{ github.sha }})"
               echo "### La app responde UP en https://$FQDN" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             sleep 15
           done
-          echo "::error::La app no respondio UP en /actuator/health despues de 10 intentos. Queda prendida para revisar: az containerapp logs show -n $CONTAINER_APP_NAME -g $RESOURCE_GROUP. Despues correr el workflow 'Apagar'."
+          echo "::error::La app no respondio UP en /actuator/health despues de 10 intentos. Queda prendida para revisar los logs (DEPLOY.md, 'Verificar que el contenedor corre') y despues correr el workflow 'Apagar'."
           exit 1
 
       # Si hubo deploy, solo se apaga si la prueba de humo paso (si fallo, queda prendida para revisar).
