@@ -35,6 +35,39 @@ Los valores (claves, contraseñas, URLs) no están en el código: salen de varia
 La lista completa está en `.env.example`. El perfil de desarrollo local tiene su plantilla en
 `src/main/resources/application-dev.properties.example`; el archivo real está en `.gitignore`.
 
+## Twelve-Factor
+
+Cómo cumple el proyecto cada uno de los [12 factores](https://12factor.net/es/). ✅ = se cumple,
+⚠️ = se cumple en parte por usar **H2 en memoria en la nube**, que la consigna permite.
+
+| Factor | Estado | Cómo se cumple |
+|---|---|---|
+| **I. Código base** | ✅ | Un solo repo en git. El mismo código se despliega en local (docker compose) y en Azure. Cada versión queda con un tag `vX.Y.Z` automático |
+| **II. Dependencias** | ✅ | Todas declaradas en `build.gradle` y resueltas con el Gradle wrapper (no hace falta tener Gradle instalado). La imagen trae todo lo que necesita: JRE + jar |
+| **III. Configuración** | ✅ | Todo lo que cambia entre entornos sale de variables de entorno: `JWT_SECRET`, `GROQ_API_KEY`, `DB_*`, `PORT`, `GROQ_MODEL`... Los secretos están en la Container App y en GitHub, nunca en el código. Lista completa en `.env.example` |
+| **IV. Servicios de apoyo** | ⚠️ | Groq es un recurso conectado por URL y key, intercambiable por configuración. La base PostgreSQL de los perfiles `dev`/`prod` también (`DB_URL`). Pero en la nube la base es **H2 embebida en el mismo proceso**: no es un servicio aparte que se pueda cambiar sin tocar la app |
+| **V. Construir, distribuir, ejecutar** | ✅ | *Build*: el pipeline compila, corre los tests y arma la imagen con el SHA del commit. *Release*: esa imagen + la configuración de la Container App forman una revisión. *Run*: Azure ejecuta la revisión. Nunca se modifica código en el contenedor |
+| **VI. Procesos** | ⚠️ | La app no guarda sesiones (login con JWT), pero **sí guarda estado en memoria**: la base H2, el carrito (`CartStore`) y las fotos en `/tmp/uploads`. Si el proceso se reinicia, ese estado se pierde |
+| **VII. Asignación de puertos** | ✅ | La app trae su propio servidor (Tomcat embebido) y escucha en `server.port=${PORT:8080}`: el puerto viene del entorno, con 8080 por defecto. Azure expone ese puerto con el ingress |
+| **VIII. Concurrencia** | ⚠️ | Se escala agregando procesos (réplicas), no hilos a mano. Pero está limitada a **una réplica** (`--max-replicas 1`): con más, cada una tendría su propia base y su propio carrito, y los datos no coincidirían |
+| **IX. Desechabilidad** | ✅ | Apagado prolijo: `server.shutdown=graceful` con `timeout-per-shutdown-phase=20s` termina las requests en curso antes de cerrar (Azure espera 30 s; docker compose, 30 s con `stop_grace_period`). Arranca solo y se puede detener e iniciar cuando haga falta (workflows Levantar y Apagar) |
+| **X. Paridad entre entornos** | ⚠️ | La misma imagen corre en local y en Azure, con las mismas migraciones de Flyway. Pero en la nube la base es H2 y en desarrollo PostgreSQL. Se atenúa con `MODE=PostgreSQL` en H2 |
+| **XI. Logs** | ✅ | La app escribe a stdout como un flujo de eventos (sin archivos de log), con `requestId` y duración por request. Azure los junta en Log Analytics. Las consultas al health no se registran, para no tapar las requests reales |
+| **XII. Procesos de administración** | ✅ | Las migraciones de base (Flyway) corren con el mismo código y configuración que la app, al arrancar. El ciclo de vida se administra con los workflows y con `ScriptAz.java`, que usan la misma imagen y configuración |
+
+### Qué habría que cambiar para cumplir IV, VI, VIII y X al 100%
+
+Los cuatro tienen la misma causa: **el estado vive dentro del proceso** (H2, carrito y fotos en
+memoria). La consigna permite H2 en memoria, y con una sola réplica funciona bien, pero para cumplir
+del todo:
+
+| Cambio | Qué resuelve |
+|---|---|
+| **PostgreSQL externo** (por ejemplo Azure Database for PostgreSQL) con el perfil `prod`, que ya existe y solo necesita `DB_HOST`, `DB_NAME`, `DB_USER` y `DB_PASSWORD` | IV: la base pasa a ser un servicio conectado por configuración. X: misma base en desarrollo y en la nube. VI: los datos sobreviven a reinicios |
+| **Carrito en la base o en Redis** (Azure Cache for Redis) en vez de `CartStore` en memoria | VI: el proceso queda sin estado. VIII: cualquier réplica puede atender a cualquier cliente |
+| **Fotos en Azure Blob Storage** en vez de `/tmp/uploads` | VI: las fotos no se pierden al reiniciar |
+| **Más réplicas** (`--max-replicas` > 1 y reglas de escalado por HTTP), una vez hecho lo anterior | VIII: escalar agregando procesos |
+
 ## Workflows de GitHub Actions
 
 | Workflow | Cuándo corre | Qué hace | Cómo queda |
@@ -51,33 +84,37 @@ tres interruptores: construir, desplegar y apagar), y comparten el grupo de `con
 ### Pasos del ciclo (`ciclo-azure.yml`)
 
 1. **Verifica los secretos**: si falta alguno (o `ACR_NAME` trae `.azurecr.io`), falla con un mensaje claro.
-2. **Login en Azure** con `AZURE_CREDENTIALS`.
-3. **Construye** la imagen con dos tags (el SHA del commit y `latest`) y etiquetas OCI: título,
+2. **Tests**: instala Java 25 (con caché de Gradle) y corre `./gradlew test` con el perfil `cloud`
+   (H2) y valores de prueba para `JWT_SECRET` y `GROQ_API_KEY`, nunca los reales. Si un test falla,
+   el pipeline se frena antes de construir y el ACR ni se crea (el reporte queda como artifact
+   `reporte-tests` del run).
+3. **Login en Azure** con `AZURE_CREDENTIALS`.
+4. **Construye** la imagen con dos tags (el SHA del commit y `latest`) y etiquetas OCI: título,
    versión, fecha, commit, repo y descripción (`docker inspect` las muestra).
-4. **Escanea** la imagen con Trivy: falla si hay CVEs HIGH o CRITICAL que ya tengan parche. El
+5. **Escanea** la imagen con Trivy: falla si hay CVEs HIGH o CRITICAL que ya tengan parche. El
    build y Trivy no necesitan el ACR, así que si Trivy encuentra algo **el ACR ni se crea**.
-5. **Crea el ACR** si no existe: `rg-perfume`, misma región, Basic, usuario admin habilitado. El
+6. **Crea el ACR** si no existe: `rg-perfume`, misma región, Basic, usuario admin habilitado. El
    nombre es global en Azure y recién borrado puede tardar en liberarse: reintenta hasta 10 minutos.
-6. **Sube** la imagen al ACR (`az acr login` + `docker push`).
-7. **Credenciales del registry**: lee la contraseña admin del ACR, la oculta del log
+7. **Sube** la imagen al ACR (`az acr login` + `docker push`).
+8. **Credenciales del registry**: lee la contraseña admin del ACR, la oculta del log
    (`::add-mask::`) y la carga en la app con `az containerapp registry set`.
-8. **Despliega**: `az containerapp update --image <acr>/parcial-ing-soft:<sha>` y, si la app estaba
+9. **Despliega**: `az containerapp update --image <acr>/parcial-ing-soft:<sha>` y, si la app estaba
    detenida, la inicia (`az rest .../start`). Va en ese orden (**update → start**) porque si se
    prendiera antes, intentaría bajar la imagen anterior, que no existe en el ACR recreado. Si Azure
    no aceptara el update con la app detenida, el paso usa start → update y lo avisa con un warning;
    el orden usado queda en el resumen del run.
-9. **Prueba de humo**: espera a que la revisión activa tenga la imagen nueva y esté `Healthy`, y a
-   que `/actuator/health` responda `UP` (10 intentos cada 15 segundos).
-10. **Apaga** (solo `deploy.yml` y "Apagar"): detiene la app, verifica `runningStatus=Stopped` y
+10. **Prueba de humo**: espera a que la revisión activa tenga la imagen nueva y esté `Healthy`, y a
+    que `/actuator/health` responda `UP` (10 intentos cada 15 segundos).
+11. **Apaga** (solo `deploy.yml` y "Apagar"): detiene la app, verifica `runningStatus=Stopped` y
     borra el ACR. Si hubo deploy, solo apaga si la prueba de humo pasó: si falló, la app queda
     prendida para revisar los logs, y después hay que correr "Apagar".
-11. **Limpieza**: si algo falla después de crear el ACR y antes de tocar la app (por ejemplo el
+12. **Limpieza**: si algo falla después de crear el ACR y antes de tocar la app (por ejemplo el
     push), borra ese ACR recién creado, porque no sirve para nada y cobra.
-12. **Logout de Azure** (`az logout`), siempre, aunque haya fallado un paso anterior.
+13. **Logout de Azure** (`az logout`), siempre, aunque haya fallado un paso anterior.
 
-No usa `azure/container-apps-deploy-action` (como el proyecto de referencia) porque esa action
-crea el entorno en otra región y modo; el nuestro es **Express en `chilecentral`**, y con
-`az containerapp update` se actualiza la app existente sin tocar el entorno.
+    No usa `azure/container-apps-deploy-action` (como el proyecto de referencia) porque esa action
+    crea el entorno en otra región y modo; el nuestro es **Express en `chilecentral`**, y con
+    `az containerapp update` se actualiza la app existente sin tocar el entorno.
 
 ### Controles por mensaje de commit: `/notdeploy` y `/keeprunning`
 
@@ -405,7 +442,7 @@ Si falta alguno de GitHub, el primer paso del pipeline lo avisa con su nombre.
 ## Auditoría de CVEs
 
 - **En el pipeline**: Trivy escanea la imagen completa (jars de la app y base Distroless) en cada
-  push. No necesita API key. La action está fijada al commit `ed142fd…` (v0.36.0) y no a un tag,
+  push. El antes y el después (13 CVEs → 0) está en [docs/seguridad/trivy.md](docs/seguridad/trivy.md). No necesita API key. La action está fijada al commit `ed142fd…` (v0.36.0) y no a un tag,
   porque en 2026 hubo un incidente en el que se modificaron tags de `trivy-action`.
 - **A mano** (OWASP Dependency-Check, solo dependencias Java): necesita una API key gratuita de
   NVD (nvd.nist.gov/developers/request-an-api-key), cargada solo como variable de entorno, nunca

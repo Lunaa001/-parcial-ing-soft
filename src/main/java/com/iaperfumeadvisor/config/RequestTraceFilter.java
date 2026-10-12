@@ -22,6 +22,7 @@ import java.util.UUID;
 public class RequestTraceFilter extends OncePerRequestFilter {
 
     private static final String REQUEST_ID_HEADER = "X-Request-Id";
+    private static final String HEALTH_PATH = "/actuator/health";
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
@@ -33,8 +34,12 @@ public class RequestTraceFilter extends OncePerRequestFilter {
         try {
             chain.doFilter(request, response);
         } finally {
-            long durationMs = (System.nanoTime() - start) / 1_000_000;
-            log.info("{} {} -> {} en {} ms", request.getMethod(), request.getRequestURI(), response.getStatus(), durationMs);
+            // Las probes de Azure y la prueba de humo consultan el health todo el tiempo: no se
+            // registran para no tapar los logs de las requests reales (igual llevan X-Request-Id)
+            if (!request.getRequestURI().startsWith(HEALTH_PATH)) {
+                long durationMs = (System.nanoTime() - start) / 1_000_000;
+                log.info("{} {} -> {} en {} ms", request.getMethod(), request.getRequestURI(), response.getStatus(), durationMs);
+            }
             MDC.remove("requestId");
         }
     }

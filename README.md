@@ -100,7 +100,9 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun          # Windows: set SPRING_PROF
   (`feat:` sube la Y, `fix:`/`refactor:` la Z, `!` o `BREAKING CHANGE:` la X).
 - **A mano**: `java ScriptAz.java` (menú para construir, desplegar, parar, iniciar, ver logs).
 
-Paso a paso y comandos: [DEPLOY.md](DEPLOY.md).
+Paso a paso y comandos: [DEPLOY.md](DEPLOY.md). Ahí también está cómo cumple el proyecto los
+**12 factores** (sección "Twelve-Factor"). El informe de vulnerabilidades (13 CVEs → 0) está en
+[docs/seguridad/trivy.md](docs/seguridad/trivy.md).
 
 ## Variables y secretos
 

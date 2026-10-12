@@ -52,6 +52,33 @@ jobs:
       - uses: actions/checkout@v7
         if: inputs.construir
 
+      - name: Instalar Java 25 (con cache de Gradle)
+        if: inputs.construir
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      # Antes del build y de tocar Azure: si un test falla, el pipeline se frena y el ACR ni se crea.
+      # Perfil cloud (H2 en memoria) para no necesitar PostgreSQL. Los valores son de prueba, nunca
+      # los reales: la key de Groq invalida solo hace fallar el precalentado (un WARN), no el test.
+      - name: Tests (./gradlew test)
+        if: inputs.construir
+        env:
+          SPRING_PROFILES_ACTIVE: cloud
+          JWT_SECRET: clave-de-prueba-solo-para-tests-de-ci-0123456789abcdef
+          GROQ_API_KEY: gsk_prueba_ci_no_valida
+        run: ./gradlew test --no-daemon
+
+      - name: Guardar el reporte de tests si fallan
+        if: failure() && inputs.construir
+        uses: actions/upload-artifact@v7
+        with:
+          name: reporte-tests
+          path: build/reports/tests/test/
+          if-no-files-found: ignore
+
       - name: Login en Azure (service principal)
         uses: azure/login@v3
         with:

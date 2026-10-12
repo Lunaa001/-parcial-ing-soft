@@ -9,3 +9,5 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: cloud
     restart: unless-stopped
+    # La app hace apagado prolijo hasta 20 s (server.shutdown=graceful); docker espera 10 s por defecto
+    stop_grace_period: 30s
