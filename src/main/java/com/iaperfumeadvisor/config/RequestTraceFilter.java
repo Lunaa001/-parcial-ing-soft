@@ -38,9 +38,19 @@ public class RequestTraceFilter extends OncePerRequestFilter {
             // registran para no tapar los logs de las requests reales (igual llevan X-Request-Id)
             if (!request.getRequestURI().startsWith(HEALTH_PATH)) {
                 long durationMs = (System.nanoTime() - start) / 1_000_000;
-                log.info("{} {} -> {} en {} ms", request.getMethod(), request.getRequestURI(), response.getStatus(), durationMs);
+                log.info("{} {} -> {} en {} ms", sanitize(request.getMethod()), sanitize(request.getRequestURI()),
+                        response.getStatus(), durationMs);
             }
             MDC.remove("requestId");
         }
+    }
+
+    // El metodo y la URL los manda el cliente: se reemplazan los saltos de linea y demas caracteres
+    // de control para que nadie pueda inyectar lineas falsas en el log (log injection, CWE-117).
+    static String sanitize(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace('\r', '_').replace('\n', '_').replaceAll("\\p{Cntrl}", "_");
     }
 }

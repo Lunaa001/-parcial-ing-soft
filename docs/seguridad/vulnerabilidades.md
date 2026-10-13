@@ -6,7 +6,7 @@ Cómo se revisa la seguridad del proyecto, qué encontraron las herramientas y c
 |---|---|---|---|
 | **Trivy** | imagen Docker: sistema operativo + librerías Java (app y agente) | pipeline, antes de publicar la imagen | **0 HIGH/CRITICAL** |
 | **Grype** | lo mismo, con otra base de vulnerabilidades | pipeline, antes de publicar la imagen | **0 HIGH/CRITICAL** |
-| **CodeQL** | nuestro código fuente Java (análisis estático) | GitHub code scanning, en cada push y PR | 2 high y 1 medium revisadas (ver abajo) |
+| **CodeQL** | nuestro código fuente Java (análisis estático) | GitHub code scanning, en cada push y PR | **0 high/medium abiertas**: 2 falsos positivos descartados con justificación y 1 corregida (ver abajo) |
 
 ## Escaneo de la imagen: Trivy y Grype
 
@@ -106,14 +106,17 @@ despliegue.
 consultas `security-and-quality`, sin compilar (`build-mode: none`). Los resultados están en
 GitHub → *Security → Code scanning*.
 
-Primer análisis (12/10/2026): **11 alertas**.
+Primer análisis (12/10/2026): **11 alertas**. Cada una se revisó; este es el estado final:
 
-| Severidad | Regla | Dónde | Evaluación |
-|---|---|---|---|
-| high | `java/spring-disabled-csrf-protection` | `SecurityConfig.java:39` | **Falso positivo en este contexto.** La API es stateless (`SessionCreationPolicy.STATELESS`) y el token JWT viaja en el header `Authorization`, no en cookies. CSRF necesita que el navegador mande la credencial solo (cookie), así que no aplica. Spring recomienda desactivarlo en APIs así |
-| high | `java/user-controlled-bypass` | `JwtAuthenticationFilter.java:52` | **Falso positivo.** El usuario sale de `parseSignedClaims` con `verifyWith(key)`: jjwt verifica la firma y el vencimiento antes de devolverlo; un token adulterado lanza excepción y no autentica. CodeQL no modela esa verificación |
-| medium | `java/log-injection` | `RequestTraceFilter.java:41` | **Real, riesgo bajo.** Se registra la URL que manda el cliente. Tomcat rechaza saltos de línea crudos en la URL y `getRequestURI()` la devuelve sin decodificar (`%0A` queda literal), así que no se pueden falsificar líneas de log. Se podría sanear igual |
-| note (8) | `java/deprecated-call`, `java/internal-representation-exposure`, `java/uncaught-number-format-exception` | `GroqServiceImpl`, `Cart`, `ScriptAz.java` | Calidad de código, no seguridad |
+| Severidad | Regla | Dónde | Evaluación | Estado |
+|---|---|---|---|---|
+| high | `java/spring-disabled-csrf-protection` | `SecurityConfig.java:39` | **Falso positivo en este contexto.** La API es stateless (`SessionCreationPolicy.STATELESS`) y el token JWT viaja en el header `Authorization`, sin cookies de sesión. CSRF necesita que el navegador mande la credencial solo (cookie), así que no aplica. Spring recomienda desactivarlo en APIs así | **Descartada** en GitHub como *false positive*, con esta justificación |
+| high | `java/user-controlled-bypass` | `JwtAuthenticationFilter.java:52` | **Falso positivo.** El usuario sale de `Jwts.parser().verifyWith(key).parseSignedClaims(token)`: jjwt verifica la firma y el vencimiento antes de usar el token; uno adulterado lanza `JwtException` y no autentica. CodeQL no modela esa verificación | **Descartada** en GitHub como *false positive*, con esta justificación |
+| medium | `java/log-injection` | `RequestTraceFilter.java:41` | **Real, riesgo bajo.** Se escribían en el log el método y la URL tal como los manda el cliente | **Corregida**: `RequestTraceFilter.sanitize()` reemplaza saltos de línea (`\r`, `\n`) y todos los caracteres de control por `_` antes de loguear. Lo cubre `RequestTraceFilterTest` |
+| note (8) | `java/deprecated-call`, `java/internal-representation-exposure`, `java/uncaught-number-format-exception` | `GroqServiceImpl`, `Cart`, `ScriptAz.java` | Calidad de código, no seguridad | Abiertas, sin impacto de seguridad |
+
+Las alertas descartadas siguen visibles en GitHub (*Security → Code scanning → Closed*) con quién
+las revisó y por qué; si el código cambia y el problema reaparece, CodeQL las vuelve a abrir.
 
 ## Diferencias entre las herramientas
 
