@@ -1,27 +1,34 @@
-# Informe de vulnerabilidades (Trivy)
+# Informe de vulnerabilidades
 
-Escaneo de la imagen Docker de la app (`parcial-ing-soft`) con
-[Trivy](https://trivy.dev/), antes y después de corregir las dependencias.
+Cómo se revisa la seguridad del proyecto, qué encontraron las herramientas y cómo se corrigió.
 
-## Cómo se escanea
+| Herramienta | Qué revisa | Dónde corre | Resultado actual |
+|---|---|---|---|
+| **Trivy** | imagen Docker: sistema operativo + librerías Java (app y agente) | pipeline, antes de publicar la imagen | **0 HIGH/CRITICAL** |
+| **Grype** | lo mismo, con otra base de vulnerabilidades | pipeline, antes de publicar la imagen | **0 HIGH/CRITICAL** |
+| **CodeQL** | nuestro código fuente Java (análisis estático) | GitHub code scanning, en cada push y PR | 2 high y 1 medium revisadas (ver abajo) |
 
-- **Dónde:** en el pipeline de GitHub Actions (`.github/workflows/ciclo-azure.yml`), en cada push a
-  `main` y en el workflow "Levantar", **antes** de subir la imagen al registry. Si encuentra algo, el
+## Escaneo de la imagen: Trivy y Grype
+
+- **Dónde:** en el pipeline (`.github/workflows/ciclo-azure.yml`), en cada push a `main` y en
+  "Levantar", **antes** de subir la imagen al registry. Si cualquiera de los dos encuentra algo, el
   pipeline se frena: la imagen no se publica, el ACR ni se crea y la app sigue con la versión anterior.
-- **Herramienta:** `aquasecurity/trivy-action` v0.36.0 (Trivy 0.70.0), fijada al commit
-  `ed142fd0673e97e23eac54620cfb913e5ce36c25` y no a un tag, para que nadie pueda cambiar el código que
-  corre (en 2026 hubo un incidente en el que se modificaron tags de esa action).
-- **Qué revisa:** el sistema operativo de la imagen (Distroless, Debian 13) y las librerías Java
-  dentro de `app.jar`.
-- **Criterio:** falla con vulnerabilidades **HIGH o CRITICAL que ya tengan parche**
-  (`severity: HIGH,CRITICAL`, `ignore-unfixed: true`, `exit-code: 1`).
+- **Criterio (el mismo en los dos):** falla con vulnerabilidades **HIGH o CRITICAL que ya tengan
+  parche**. Trivy: `severity: HIGH,CRITICAL`, `ignore-unfixed: true`. Grype: `severity-cutoff: high`,
+  `only-fixed: true`.
+- **Versiones fijadas por commit, no por tag** (para que nadie pueda cambiar el código que corre; en
+  2026 hubo un incidente en el que se modificaron tags de `trivy-action`):
+  - `aquasecurity/trivy-action` v0.36.0 (Trivy 0.70.0) → `ed142fd0673e97e23eac54620cfb913e5ce36c25`
+  - `anchore/scan-action` v7.4.2 (Grype) → `27805bf3b4e84b4a5c980df22ed233c00390a439`
+- **Qué hay en la imagen:** el sistema operativo Distroless (Debian 13), `app.jar` (la app con sus
+  dependencias) y, desde `v0.4.0`, `applicationinsights-agent.jar` (agente de monitoreo).
 
-## Antes: 13 vulnerabilidades (06/10/2026)
+### Antes: 13 vulnerabilidades (06/10/2026)
 
-Primer escaneo, con Spring Boot 4.1.1 tal cual (run
+Primer escaneo con Trivy, con Spring Boot 4.1.1 tal cual (run
 [37495913227](https://github.com/Lunaa001/-parcial-ing-soft/actions/runs/37495913227), commit `711f3f9`).
 
-| Imagen | Resultado |
+| Parte de la imagen | Resultado |
 |---|---|
 | Sistema operativo (Debian 13.7, Distroless) | 0 |
 | `app.jar` | **13 (3 CRITICAL, 10 HIGH)** |
@@ -45,7 +52,7 @@ Primer escaneo, con Spring Boot 4.1.1 tal cual (run
 Jackson aparece dos veces porque Spring Boot 4 usa Jackson 3, pero la librería de JWT
 (`jjwt-jackson`) todavía usa Jackson 2.
 
-## Cómo se corrigió
+### Cómo se corrigió
 
 Spring Boot 4.1.1 era (y sigue siendo) la última versión publicada, así que no había una versión
 nueva de Spring Boot con los arreglos. Se fijaron versiones parcheadas con las propiedades del BOM
@@ -73,19 +80,58 @@ ext['jackson-2-bom.version'] = '2.21.7'
 - **Hay que sacar estas 3 líneas** cuando se suba a una versión de Spring Boot que ya traiga estas
   versiones o superiores; si no, podrían quedar fijadas versiones más viejas.
 
-## Después: 0 vulnerabilidades HIGH/CRITICAL
+### Después: 0 vulnerabilidades HIGH/CRITICAL con los dos escáneres
 
-| Imagen | Resultado |
-|---|---|
-| Sistema operativo (Debian 13.7, Distroless) | **0** |
-| `app.jar` | **0** |
+Último escaneo, versión `v0.4.0` (run
+[38323200188](https://github.com/Lunaa001/-parcial-ing-soft/actions/runs/38323200188), commit
+`aedb2eb`, 12/10/2026), ya con el agente de Application Insights dentro de la imagen:
 
-Primer escaneo limpio: run
-[37527971295](https://github.com/Lunaa001/-parcial-ing-soft/actions/runs/37527971295) (commit
-`471292b`, 06/10/2026). Desde entonces, todos los runs del pipeline (push, "Levantar") volvieron a dar
-**0 HIGH/CRITICAL**, por ejemplo el del commit `cbf572f` (tag `v0.2.1`). Como Trivy corre en cada
-build con la base de vulnerabilidades actualizada, una vulnerabilidad nueva frenaría el próximo
+| Parte de la imagen | Trivy | Grype |
+|---|---|---|
+| Sistema operativo (Debian 13.7, Distroless) | **0** | **0** |
+| `app.jar` | **0** | **0** |
+| `applicationinsights-agent.jar` (agente 3.7.10) | **0** | **0** |
+| **Total** | **0 HIGH/CRITICAL** | **"No vulnerabilities found"** |
+
+Grype no encontró nada que Trivy no hubiera encontrado. El primer escaneo limpio con Trivy fue el
+run [37527971295](https://github.com/Lunaa001/-parcial-ing-soft/actions/runs/37527971295) (commit
+`471292b`, 06/10/2026), y desde entonces todos los runs dieron 0. Como los dos escáneres corren en
+cada build con su base de vulnerabilidades actualizada, una vulnerabilidad nueva frenaría el próximo
 despliegue.
+
+## Análisis del código: CodeQL
+
+`.github/workflows/codeql.yml` corre CodeQL para Java (`codeql-action` v4.38.3, fijado por commit
+`24c54180a607b1449ed407dd24f251e4e9147c8d`) en cada push a `main`, en cada PR y los lunes, con las
+consultas `security-and-quality`, sin compilar (`build-mode: none`). Los resultados están en
+GitHub → *Security → Code scanning*.
+
+Primer análisis (12/10/2026): **11 alertas**.
+
+| Severidad | Regla | Dónde | Evaluación |
+|---|---|---|---|
+| high | `java/spring-disabled-csrf-protection` | `SecurityConfig.java:39` | **Falso positivo en este contexto.** La API es stateless (`SessionCreationPolicy.STATELESS`) y el token JWT viaja en el header `Authorization`, no en cookies. CSRF necesita que el navegador mande la credencial solo (cookie), así que no aplica. Spring recomienda desactivarlo en APIs así |
+| high | `java/user-controlled-bypass` | `JwtAuthenticationFilter.java:52` | **Falso positivo.** El usuario sale de `parseSignedClaims` con `verifyWith(key)`: jjwt verifica la firma y el vencimiento antes de devolverlo; un token adulterado lanza excepción y no autentica. CodeQL no modela esa verificación |
+| medium | `java/log-injection` | `RequestTraceFilter.java:41` | **Real, riesgo bajo.** Se registra la URL que manda el cliente. Tomcat rechaza saltos de línea crudos en la URL y `getRequestURI()` la devuelve sin decodificar (`%0A` queda literal), así que no se pueden falsificar líneas de log. Se podría sanear igual |
+| note (8) | `java/deprecated-call`, `java/internal-representation-exposure`, `java/uncaught-number-format-exception` | `GroqServiceImpl`, `Cart`, `ScriptAz.java` | Calidad de código, no seguridad |
+
+## Diferencias entre las herramientas
+
+| | **Trivy** | **Grype** | **Snyk** | **CodeQL** |
+|---|---|---|---|---|
+| **Qué analiza** | imágenes, archivos, repos, IaC (Dockerfile, Terraform), secretos | imágenes y archivos (dependencias y SO) | dependencias, código (Snyk Code), contenedores, IaC | **código fuente** propio |
+| **Tipo de análisis** | composición de software (SCA): busca versiones con CVEs conocidos | SCA | SCA + análisis estático (SAST) | análisis estático (SAST): sigue el flujo de datos del código |
+| **Encuentra** | librerías y paquetes del SO vulnerables, configuraciones inseguras, secretos | librerías y paquetes del SO vulnerables | lo de Trivy/Grype + vulnerabilidades en el código | inyecciones, validaciones faltantes, criptografía débil, errores de lógica de seguridad |
+| **No encuentra** | errores en nuestro código | errores en nuestro código, IaC, secretos | — | librerías vulnerables (eso lo hacen los otros) |
+| **Base de vulnerabilidades** | propia de Aqua (NVD, GitHub Advisories, avisos de distros) | propia de Anchore (NVD, GitHub Advisories, distros) | propia de Snyk (curada, con análisis de alcance) | consultas (queries) de GitHub y la comunidad |
+| **Licencia / costo** | open source, gratis | open source, gratis | comercial; plan gratis con límite de escaneos | gratis en repos públicos; en privados requiere GitHub Advanced Security |
+| **Necesita cuenta o token** | no | no | sí (token de Snyk) | no (integrado en GitHub) |
+| **En este proyecto** | ✅ en el pipeline | ✅ en el pipeline | ❌ no se usa: pide cuenta y token, y lo que aporta en SCA ya lo cubren Trivy y Grype | ✅ `codeql.yml` |
+
+**Por qué dos escáneres de imagen:** Trivy y Grype usan bases de vulnerabilidades distintas y
+detectan las librerías de forma distinta (por ejemplo, cómo identifican un jar empaquetado dentro de
+otro). Lo que a uno se le escapa, el otro lo puede encontrar. CodeQL cubre lo que ninguno de los dos
+ve: los errores de seguridad en el código que escribimos nosotros.
 
 ## Auditoría complementaria a mano
 

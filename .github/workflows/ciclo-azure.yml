@@ -24,6 +24,11 @@ env:
   # Application Insights (modo workspace) creado una sola vez a mano en el resource group; no se
   # borra al apagar. Si no existe, el deploy sigue sin telemetria y avisa con un warning.
   APPINSIGHTS_NAME: appi-perfume
+  # Recursos de la app. Con el agente de Application Insights, 0.25 vCPU / 0.5 GiB no alcanzaba (no
+  # llegaba a arrancar en 4,5 min y la memoria del proceso llega a ~390 MB): con 0.5 / 1 GiB arranca
+  # en ~50 s. Solo se cobra mientras esta prendida (entra en el cupo gratis de Container Apps).
+  APP_CPU: '0.5'
+  APP_MEMORY: 1.0Gi
 
 jobs:
   ciclo:
@@ -220,6 +225,7 @@ jobs:
             # shellcheck disable=SC2086
             az containerapp update --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
               --image "$IMAGE:$VERSION" \
+              --cpu "$APP_CPU" --memory "$APP_MEMORY" \
               --set-env-vars APP_VERSION="$VERSION" GIT_SHA="${{ github.sha }}" $APPINSIGHTS_ENV \
               --output none
           }

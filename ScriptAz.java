@@ -8,7 +8,7 @@
  *
  * Gestiona el ciclo de vida de la app en Azure Container Apps:
  *   1) Build local + push al ACR (con telemetria OCI)
- *   2) Deploy en Azure Container Apps (perfil minimo 0.25 CPU / 0.5Gi)
+ *   2) Deploy en Azure Container Apps (0.5 vCPU / 1Gi, sin GPU)
  *   3) Parar / Iniciar, Listar y Eliminar instancias
  *   4) Pull de la imagen desde el ACR
  *   5) Logs en tiempo real
@@ -342,8 +342,8 @@ public class ScriptAz {
             targetPort = get(env, "TARGET_PORT", "8080");
 
             // Perfil minimo (sin GPU, para no gastar creditos)
-            cpu = get(env, "CPU", "0.25");
-            memory = get(env, "MEMORY", "0.5Gi");
+            cpu = get(env, "CPU", "0.5");
+            memory = get(env, "MEMORY", "1.0Gi");
             minReplicas = get(env, "MIN_REPLICAS", "1");
             maxReplicas = get(env, "MAX_REPLICAS", "1");
         }

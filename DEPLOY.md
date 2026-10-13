@@ -457,6 +457,25 @@ az monitor log-analytics query -w $WS -o table --analytics-query \
   "AppPerformanceCounters | where TimeGenerated > ago(1h) | summarize avg(Value) by Name"
 ```
 
+**Lo que se vio en la prueba (v0.4.0, 13/10/2026):**
+
+| Qué | Resultado |
+|---|---|
+| `POST /api/auth/login` | 4 requests: 731 ms (la primera, en frío), 137 ms, 102 ms y un 401 de credenciales inválidas en 99 ms |
+| Otras requests | `POST /api/chat` 1163 ms, `POST /api/recommendations` 512 ms, `GET /api/perfumes` 68 ms |
+| Mapa de aplicación (dependencias) | `perfume-api` → **`api.groq.com`** (`POST /openai/v1/chat/completions`, 3 llamadas, ~508 ms promedio, todas OK) y → **H2** (consultas SQL a `users` y `perfumes`, < 1 ms) |
+| CPU | `% Processor Time` ~1,2 % promedio, 3 % máximo (en reposo, con 0,5 vCPU) |
+| Memoria | `Private Bytes` del proceso ~340 MB promedio, **388 MB máximo**; además métricas de la JVM (`jvm_memory_used`, hilos, buffers) |
+| Logs | cada línea del log de la app llega a `AppTraces` (por ejemplo `POST /api/auth/login -> 200 en 722 ms`) |
+| Volumen | ~0,46 MB en 7 minutos (casi todo métricas): ~95 MB por día si quedara prendida todo el día, debajo del tope de 0,15 GB |
+
+**Recursos de la app:** con el agente, **0,25 vCPU / 0,5 GiB no alcanza**: el agente solo tarda 31 s
+en arrancar y la app no llegó a levantar en 4,5 minutos (Azure reinició el contenedor), y la
+memoria del proceso llega a 388 MB, demasiado justa para 512 MB. Se pasó a **0,5 vCPU / 1 GiB**
+(`APP_CPU` y `APP_MEMORY` en `ciclo-azure.yml`, y los defaults de `ScriptAz.java`): el agente arranca
+en 15,7 s y Spring en 32,7 s, **unos 50 segundos en total**. Solo se cobra mientras la app está
+prendida, dentro del cupo gratis de Container Apps.
+
 **Costo:** el recurso no cobra. La telemetría entra al workspace, cuyos primeros 5 GB por mes son
 gratis, y el workspace tiene un **tope de 0,15 GB por día**: si se llegara, deja de recibir datos
 hasta el día siguiente, en vez de cobrar.
@@ -576,7 +595,7 @@ dejan, podrían quedar fijadas versiones más viejas que las que traería el Spr
 |---|---|---|
 | **Container Registry (ACR) Basic** | **sí, por existir** | ~USD 0,17 por día, proporcional a las horas, aunque no se use. No se puede detener: solo deja de cobrar si se borra. Por eso se crea al levantar y se borra al apagar |
 | Container App **detenida** | no | `Stopped` no consume CPU ni memoria |
-| Container App **prendida** | casi nada | entra en el cupo gratis mensual de Container Apps mientras se use poco |
+| Container App **prendida** (0,5 vCPU / 1 GiB) | casi nada | entra en el cupo gratis mensual de Container Apps (180.000 vCPU-segundos y 360.000 GiB-segundos) mientras se use poco: unas 100 horas prendida por mes |
 | Log Analytics (`workspace-rgperfume…`) | prácticamente no | lo usan el entorno (logs) y Application Insights (telemetría); los primeros 5 GB por mes son gratis y tiene **tope de 0,15 GB/día**. Se deja |
 | Application Insights (`appi-perfume`) | no | modo workspace: no cobra aparte, solo la ingesta del workspace (ver arriba). No se borra al apagar |
 | Entorno Container Apps, resource group | no | |
