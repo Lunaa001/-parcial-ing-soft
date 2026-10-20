@@ -233,39 +233,6 @@ public class ScriptAz {
         }
     }
 
-    /**
-     * Como runStream, pero el usuario lo corta con Enter (para --follow de logs). Ctrl+C
-     * cerraria todo el programa, por eso se usa Enter para volver al menu.
-     */
-    static int runStreamUntilEnter(List<String> cmd) {
-        ProcessBuilder pb = new ProcessBuilder(resolve(cmd))
-                .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-                .redirectError(ProcessBuilder.Redirect.INHERIT)
-                .redirectInput(ProcessBuilder.Redirect.PIPE);
-        try {
-            // az es un programa Python: sin esto, si la salida no es una consola, escribe con buffer
-            // y los logs en vivo no aparecen hasta que se corta el streaming
-            pb.environment().put("PYTHONUNBUFFERED", "1");
-            Process p = pb.start();
-            p.getOutputStream().close();
-            while (p.isAlive()) {
-                if (IN.ready()) {
-                    IN.readLine();
-                    destroyTree(p);
-                    p.waitFor(10, TimeUnit.SECONDS);
-                    return 130;
-                }
-                Thread.sleep(200);
-            }
-            return p.exitValue();
-        } catch (IOException e) {
-            return 127;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return 130;
-        }
-    }
-
     /** En Windows az.cmd lanza un python hijo: hay que cortar tambien los descendientes. */
     static void destroyTree(Process p) {
         p.descendants().forEach(ProcessHandle::destroyForcibly);
@@ -1083,8 +1050,8 @@ public class ScriptAz {
                 logErr("La app '" + config.appName + "' no existe");
                 return false;
             }
-            // En un entorno estandar (perfume-env-std) hay streaming en vivo con az containerapp logs
-            // show --follow. Los entornos Express no dan ese endpoint (falla con KeyError
+            // En un entorno estandar (perfume-env-std) se leen del contenedor con az containerapp logs
+            // show. Los entornos Express no dan ese endpoint (falla con KeyError
             // 'eventStreamEndpoint'): en ese caso se leen los logs de Log Analytics.
             Result endpoint = runCmd(List.of("az", "containerapp", "show", "--name", config.appName,
                     "--resource-group", config.resourceGroup,
@@ -1092,18 +1059,77 @@ public class ScriptAz {
             if (endpoint.code() != 0 || endpoint.out().isEmpty()) {
                 return logsFromLogAnalytics();
             }
-            int code = runStreamUntilEnter(List.of("az", "containerapp", "logs", "show",
-                    "--name", config.appName, "--resource-group", config.resourceGroup,
-                    "--type", "console", "--format", "text", "--follow"));
-            if (code == 130) {
-                OUT.println("  " + Color.info("→") + " Streaming finalizado — volviendo al menú");
+            return logsByPolling();
+        }
+
+        /**
+         * Logs del contenedor casi en vivo: cada 5 segundos pide las ultimas lineas con
+         * az containerapp logs show --tail (sin --follow) y muestra solo las nuevas. Se usa esto y no
+         * --follow porque --follow, al menos en Windows, puede no mostrar ninguna linea hasta que
+         * se corta. Enter vuelve al menu.
+         */
+        boolean logsByPolling() {
+            logInfo("Se consultan las últimas líneas del contenedor cada 5 segundos (se muestran solo las nuevas).");
+            OUT.println(Color.DIM + "─".repeat(60) + Color.RESET);
+            // Cada linea empieza con su fecha ISO (2026-10-20T19:05:40.9450259Z), que se puede comparar
+            // como texto: se muestran solo las posteriores a la ultima mostrada, en orden. El conjunto
+            // de lineas vistas evita repetir las que tienen exactamente la misma fecha.
+            String ultimaFecha = "";
+            java.util.Set<String> vistas = new java.util.LinkedHashSet<>();
+            boolean primera = true;
+            int fallos = 0;
+            try {
+                while (true) {
+                    Result r = runCmd(List.of("az", "containerapp", "logs", "show",
+                            "--name", config.appName, "--resource-group", config.resourceGroup,
+                            "--type", "console", "--format", "text", "--tail", primera ? "20" : "100"), 60);
+                    if (r.code() != 0) {
+                        if (++fallos >= 3) {
+                            logErr("No se pudieron leer los logs (código " + r.code() + ") — volviendo al menú");
+                            return false;
+                        }
+                        logWarn("No se pudieron leer los logs (código " + r.code() + "), reintento...");
+                    } else {
+                        fallos = 0;
+                        for (String line : r.out().lines().toList()) {
+                            // Cada consulta abre una conexion nueva y el servicio agrega estas dos lineas
+                            if (line.isBlank() || line.contains("Connecting to the container")
+                                    || line.contains("Successfully Connected to container")) {
+                                continue;
+                            }
+                            int espacio = line.indexOf(' ');
+                            String fecha = espacio > 0 ? line.substring(0, espacio) : "";
+                            if (fecha.compareTo(ultimaFecha) < 0 || !vistas.add(line)) {
+                                continue;
+                            }
+                            OUT.println(line);
+                            ultimaFecha = fecha;
+                        }
+                        while (vistas.size() > 1000) {
+                            vistas.remove(vistas.iterator().next());
+                        }
+                        if (primera && vistas.isEmpty()) {
+                            logInfo("Sin líneas recientes — esperando líneas nuevas...");
+                        }
+                        primera = false;
+                    }
+                    // 5 segundos entre consultas, mirando cada 200 ms si el usuario presiono Enter
+                    for (int i = 0; i < 25; i++) {
+                        if (IN.ready()) {
+                            IN.readLine();
+                            OUT.println("  " + Color.info("→") + " Logs finalizados — volviendo al menú");
+                            return true;
+                        }
+                        Thread.sleep(200);
+                    }
+                }
+            } catch (IOException e) {
+                logErr("Error leyendo la entrada: " + e.getMessage());
+                return false;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 return true;
             }
-            if (code != 0) {
-                logErr("No se pudo conectar a los logs (código " + code + ")");
-                return false;
-            }
-            return true;
         }
 
         /**

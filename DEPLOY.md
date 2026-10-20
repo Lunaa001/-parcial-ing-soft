@@ -229,7 +229,7 @@ pregunta nombre de imagen (`parcial-ing-soft`), tag y puerto (`8080`).
 | **3c** Listar | tabla con nombre, estado, CPU, memoria, réplicas y URL de las apps del grupo | `az containerapp list` |
 | **3d** Eliminar | borra una app (pide confirmación; es irreversible) | `az containerapp delete` |
 | **4** Pull | baja la imagen del ACR y ofrece correrla en local (con `--env-file .env`) | `docker pull`, `docker run` |
-| **5** Logs | logs de la consola **en vivo**; **Enter** vuelve al menú. En un entorno Express (sin streaming) los lee de Log Analytics cada 10 s | `az containerapp logs show --follow` (en Express: `az rest` a la API de Log Analytics) |
+| **5** Logs | logs de la consola casi en vivo: cada 5 s pide las últimas líneas y muestra **solo las nuevas, en orden**; **Enter** vuelve al menú. En un entorno Express (sin streaming) los lee de Log Analytics cada 10 s | `az containerapp logs show --tail` (en Express: `az rest` a la API de Log Analytics) |
 | **6** Reconfigurar | vuelve a elegir los recursos | `az group/acr/containerapp list` |
 | **0** Salir | ofrece cerrar la sesión de Azure CLI | `az logout` |
 
@@ -248,6 +248,11 @@ Diferencias con el `script_az.py` original:
   parar/iniciar (la que se probó con nuestra app).
 - En los logs se vuelve al menú con **Enter** y no con Ctrl+C: en Java, Ctrl+C cierra todo el
   programa.
+- **Logs sin `--follow`:** la opción 5 consulta `az containerapp logs show --tail` cada 5 segundos
+  y muestra solo las líneas con fecha posterior a la última mostrada. No usa `--follow` porque en
+  las pruebas (Windows, salida redirigida) se conectaba pero no mostraba ninguna línea en 45
+  segundos; sin `--follow` las líneas aparecen siempre. Si una consulta falla, reintenta (corta
+  después de 3 fallos seguidos).
 - **Logs en Express:** `az containerapp logs show` falla en entornos Express con
   `KeyError: 'eventStreamEndpoint'` (no dan endpoint de streaming en vivo). Si la app no
   tiene ese endpoint, la opción 5 consulta la tabla `ContainerAppConsoleLogs_CL` del Log Analytics
@@ -539,11 +544,18 @@ az containerapp show -n $APP -g $RG --query properties.configuration.ingress.fqd
 curl https://<fqdn>/actuator/health                         # debe devolver {"status":"UP"}
 ```
 
-**Logs en vivo** (entorno estándar), o con la opción 5 de `ScriptAz.java`:
+**Logs del contenedor** (entorno estándar), o con la opción 5 de `ScriptAz.java`, que los
+refresca sola cada 5 segundos:
 
 ```bash
-az containerapp logs show -n perfume-api2 -g rg-perfume --follow --tail 20   # Ctrl+C para cortar
+az containerapp logs show -n perfume-api2 -g rg-perfume --tail 20            # últimas 20 líneas (comprobado)
+az containerapp logs show -n perfume-api2 -g rg-perfume --follow --tail 20   # en vivo; Ctrl+C para cortar
 ```
+
+Sin `--follow` funciona siempre. Con `--follow`, en las pruebas desde Windows con la salida
+redirigida a un archivo, se conectaba pero no mostraba líneas; en una terminal normal puede
+funcionar, pero conviene probarlo antes de depender de eso. También se ven en el portal:
+`perfume-api2` → *Supervisión → Secuencia de registro*.
 
 Los logs también quedan guardados en Log Analytics (con unos minutos de demora), para buscar hacia
 atrás (necesita la extensión `log-analytics`: `az extension add -n log-analytics`):
