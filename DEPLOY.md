@@ -15,8 +15,8 @@ dejarla prendida, por ejemplo para presentar, está el workflow **Levantar**; pa
 - **Secretos**: nunca en el repo. Se cargan como secretos de GitHub (para el pipeline) y como
   secretos de la Container App (para la aplicación).
 - **Acceso al registry**: GitHub sube la imagen con el service principal (`az acr login`). La
-  Container App la descarga con el usuario admin del ACR, porque el entorno **Express** no admite
-  identidad administrada. Como el ACR se recrea en cada levantada, su contraseña admin cambia: el
+  Container App la descarga con el usuario admin del ACR (al principio el entorno era **Express**,
+  que no admitía identidad administrada, y se mantuvo así). Como el ACR se recrea en cada levantada, su contraseña admin cambia: el
   pipeline la lee (`az acr credential show`) y la vuelve a cargar en la app (`registry set`).
 - **ACR efímero**: el ACR existe solo mientras la app está levantada. La Container App, su
   configuración (secretos y variables) y el resource group **nunca** se borran.
@@ -119,7 +119,7 @@ tres interruptores: construir, desplegar y apagar), y comparten el grupo de `con
 14. **Logout de Azure** (`az logout`), siempre, aunque haya fallado un paso anterior.
 
 No usa `azure/container-apps-deploy-action` (como el proyecto de referencia) porque esa action
-    crea el entorno en otra región y modo; el nuestro es **Express en `chilecentral`**, y con
+    crea el entorno en otra región y modo; el nuestro es **`perfume-env-std` en `chilecentral`**, y con
     `az containerapp update` se actualiza la app existente sin tocar el entorno.
 
 ### Controles por mensaje de commit: `/notdeploy` y `/keeprunning`
@@ -184,7 +184,7 @@ acrperfume45184.azurecr.io/parcial-ing-soft:latest
 
 ```bash
 az acr repository show-tags -n acrperfume45184 --repository parcial-ing-soft -o table
-az containerapp show -n perfume-api -g rg-perfume --query "properties.template.containers[0].image" -o tsv
+az containerapp show -n perfume-api2 -g rg-perfume --query "properties.template.containers[0].image" -o tsv
 ```
 
 ## Correr en local con Docker Compose
@@ -229,7 +229,7 @@ pregunta nombre de imagen (`parcial-ing-soft`), tag y puerto (`8080`).
 | **3c** Listar | tabla con nombre, estado, CPU, memoria, réplicas y URL de las apps del grupo | `az containerapp list` |
 | **3d** Eliminar | borra una app (pide confirmación; es irreversible) | `az containerapp delete` |
 | **4** Pull | baja la imagen del ACR y ofrece correrla en local (con `--env-file .env`) | `docker pull`, `docker run` |
-| **5** Logs | logs de la consola; **Enter** vuelve al menú. En Express los lee de Log Analytics cada 10 s (llegan con unos minutos de demora) | `az containerapp logs show --follow` o, en Express, `az rest` a la API de Log Analytics |
+| **5** Logs | logs de la consola **en vivo**; **Enter** vuelve al menú. En un entorno Express (sin streaming) los lee de Log Analytics cada 10 s | `az containerapp logs show --follow` (en Express: `az rest` a la API de Log Analytics) |
 | **6** Reconfigurar | vuelve a elegir los recursos | `az group/acr/containerapp list` |
 | **0** Salir | ofrece cerrar la sesión de Azure CLI | `az logout` |
 
@@ -248,8 +248,8 @@ Diferencias con el `script_az.py` original:
   parar/iniciar (la que se probó con nuestra app).
 - En los logs se vuelve al menú con **Enter** y no con Ctrl+C: en Java, Ctrl+C cierra todo el
   programa.
-- **Logs en Express:** `az containerapp logs show` falla en nuestro entorno con
-  `KeyError: 'eventStreamEndpoint'` (Express no da endpoint de streaming en vivo). Si la app no
+- **Logs en Express:** `az containerapp logs show` falla en entornos Express con
+  `KeyError: 'eventStreamEndpoint'` (no dan endpoint de streaming en vivo). Si la app no
   tiene ese endpoint, la opción 5 consulta la tabla `ContainerAppConsoleLogs_CL` del Log Analytics
   del entorno cada 10 segundos, con la API REST (`az rest`, sin extensiones). Muestra las últimas
   30 líneas de los últimos 15 minutos y después las nuevas a medida que llegan, con unos minutos
@@ -271,7 +271,7 @@ Se cargan en **Settings → Secrets and variables → Actions → New repository
 |---|---|---|
 | `AZURE_CREDENTIALS` | JSON del service principal (ver abajo) | `{"clientId":"...", ...}` |
 | `ACR_NAME` | nombre del Container Registry, **sin** `.azurecr.io`, en minúsculas | `acrperfume45184` |
-| `CONTAINER_APP_NAME` | nombre de la Container App | `perfume-api` |
+| `CONTAINER_APP_NAME` | nombre de la Container App | `perfume-api2` |
 | `RESOURCE_GROUP` | grupo de recursos | `rg-perfume` |
 
 > No hacen falta `ACR_USERNAME` ni `ACR_PASSWORD`: el login al ACR se hace con el service principal.
@@ -356,7 +356,7 @@ MSYS_NO_PATHCONV=1 az role assignment create --assignee <clientId> \
 ## Pasos manuales (una sola vez)
 
 Variables de ejemplo: `RG=rg-perfume`, `LOC=chilecentral`, `ACR=acrperfume<numero>`,
-`ENV=perfume-env`, `APP=perfume-api`. En Git Bash, anteponer `MSYS_NO_PATHCONV=1` a cualquier
+`ENV=perfume-env-std`, `APP=perfume-api2`. En Git Bash, anteponer `MSYS_NO_PATHCONV=1` a cualquier
 comando que tenga un argumento que empiece con `/`.
 
 ```bash
@@ -367,9 +367,12 @@ az group create -n $RG -l $LOC
 # 2. Container Registry: NO hace falta crearlo a mano. Lo crea el pipeline (o "Levantar") cuando
 #    lo necesita y lo borra al apagar. A mano: az acr create -g $RG -n $ACR --sku Basic --admin-enabled true
 
-# 3. Entorno (en nuestra suscripción quedó en modo Express) y Container App,
-#    con una imagen placeholder hasta el primer push del pipeline
-az containerapp env create -n $ENV -g $RG -l $LOC
+# 3. Entorno ESTANDAR y Container App, con una imagen placeholder hasta el primer push del pipeline.
+#    OJO: hay que pasar --environment-mode WorkloadProfiles. Sin eso, esta version de la CLI crea
+#    un entorno Express, que NO publica metricas de plataforma (ver "Entorno estándar").
+#    WS_ID / WS_KEY: customerId y primarySharedKey del Log Analytics.
+az containerapp env create -n $ENV -g $RG -l $LOC --environment-mode WorkloadProfiles \
+  --logs-destination log-analytics --logs-workspace-id $WS_ID --logs-workspace-key $WS_KEY
 az containerapp create -n $APP -g $RG --environment $ENV \
   --image mcr.microsoft.com/k8se/quickstart:latest \
   --target-port 8080 --ingress external \
@@ -416,6 +419,53 @@ como `nonroot`, no puede crear carpetas dentro de `/app`). Se arregló borrando 
 
 Solución: en Git Bash usar siempre `MSYS_NO_PATHCONV=1 az ...` para comandos con rutas que empiezan
 con `/`, o usar PowerShell o Azure Cloud Shell, que no tienen este problema.
+
+## Entorno estándar (`perfume-env-std`) y métricas de plataforma
+
+La app corre como **`perfume-api2`** en **`perfume-env-std`**: un entorno de Container Apps
+**estándar**, en modo `WorkloadProfiles` y solo con el perfil **Consumption** (sin perfiles
+dedicados, así que sin costo fijo: se paga por uso, con el mismo cupo gratis). Está en
+`chilecentral` y manda sus logs al mismo Log Analytics (`workspace-rgperfumeOfnB`).
+
+**Por qué se cambió:** antes la app (`perfume-api`) corría en `perfume-env`, un entorno **Express**.
+Express no publica **métricas de plataforma** en Azure Monitor: en el portal, *Supervisión →
+Métricas* mostraba "--", y `az monitor metrics list` daba vacío durante 7 días con la app prendida.
+Tampoco tiene logs en vivo (`az containerapp logs show` fallaba). La documentación de Microsoft
+avisa que en Express "algunas ventanas del portal no funcionan". En el entorno estándar las dos
+cosas funcionan.
+
+**Métricas de plataforma** (Portal → `perfume-api2` → *Supervisión → Métricas*, o por consola):
+
+| Métrica | Qué mide |
+|---|---|
+| `WorkingSetBytes` (Memory Working Set Bytes) | memoria del contenedor |
+| `UsageNanoCores` (CPU Usage) | CPU usada (1.000.000 nanocores = 1 milicore) |
+| `Requests` | requests que entraron por el ingress |
+| `Replicas` (Replica Count) | réplicas corriendo |
+
+```bash
+APP_ID=$(az containerapp show -n perfume-api2 -g rg-perfume --query id -o tsv)
+MSYS_NO_PATHCONV=1 az monitor metrics list --resource "$APP_ID" \
+  --metrics WorkingSetBytes UsageNanoCores Requests Replicas --interval PT1M --offset 30m -o table
+```
+
+Primera medición (20/10/2026, a 2 minutos de crear la app): memoria 744 MB, CPU 48,9 milicores
+(~10 % de 0,5 vCPU), 40 requests (exactamente las enviadas) y 1 réplica.
+
+**Por qué la memoria de plataforma da más que la de la JVM:** `WorkingSetBytes` mide **todo el
+contenedor** desde el sistema operativo: el heap de Java, la memoria fuera del heap (metaspace,
+hilos, código compilado), el agente de Application Insights **y la caché de archivos del sistema
+operativo** (páginas de los jars y bibliotecas que se leyeron). Application Insights, en cambio,
+muestra la memoria **del proceso Java** (`Private Bytes`, ~340 MB) y del heap (`jvm_memory_used`).
+Por eso la plataforma marca más (~744 MB); lo que importa es que quede por debajo del límite de
+1 GiB, y la caché de archivos el sistema la libera si hace falta memoria.
+
+**Cómo se pasó de Express a estándar** (sin cortar la app vieja): se creó el entorno estándar y una
+app nueva en paralelo, copiando secretos y variables; se verificó (health, login, métricas,
+Application Insights); se cambió el secreto `CONTAINER_APP_NAME` de GitHub a `perfume-api2`, y se
+detuvo la app vieja. **Ojo:** con la CLI actual, `az containerapp env create` sin
+`--environment-mode WorkloadProfiles` crea un entorno Express (así quedó creado por error
+`perfume-env2`, vacío). La suscripción de estudiante permite **un solo** entorno estándar por región.
 
 ## Monitoreo con Application Insights
 
@@ -489,16 +539,20 @@ az containerapp show -n $APP -g $RG --query properties.configuration.ingress.fqd
 curl https://<fqdn>/actuator/health                         # debe devolver {"status":"UP"}
 ```
 
-**Logs:** `az containerapp logs show` **no funciona en el entorno Express** (falla con
-`KeyError: 'eventStreamEndpoint'`). Los logs de la app se guardan en Log Analytics, con unos
-minutos de demora, y se consultan así (necesita la extensión `log-analytics`:
-`az extension add -n log-analytics`), o con la opción 5 de `ScriptAz.java`:
+**Logs en vivo** (entorno estándar), o con la opción 5 de `ScriptAz.java`:
 
 ```bash
-WS=$(az containerapp env show -n perfume-env -g rg-perfume \
+az containerapp logs show -n perfume-api2 -g rg-perfume --follow --tail 20   # Ctrl+C para cortar
+```
+
+Los logs también quedan guardados en Log Analytics (con unos minutos de demora), para buscar hacia
+atrás (necesita la extensión `log-analytics`: `az extension add -n log-analytics`):
+
+```bash
+WS=$(az containerapp env show -n perfume-env-std -g rg-perfume \
   --query properties.appLogsConfiguration.logAnalyticsConfiguration.customerId -o tsv)
 az monitor log-analytics query -w $WS -o table --analytics-query \
-  "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'perfume-api' | project TimeGenerated, Log_s | order by TimeGenerated desc | take 20"
+  "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'perfume-api2' | project TimeGenerated, Log_s | order by TimeGenerated desc | take 20"
 ```
 
 Cada request aparece con su `requestId`, método, ruta, código y duración (`RequestTraceFilter`).
@@ -611,7 +665,7 @@ creado todo el día.
    push, deploy y arranque. Termina en verde solo si la prueba de humo vio `UP` con la imagen nueva.
 3. Verificar:
    ```bash
-   az containerapp show -n perfume-api -g rg-perfume --query properties.runningStatus -o tsv   # Running
+   az containerapp show -n perfume-api2 -g rg-perfume --query properties.runningStatus -o tsv   # Running
    curl https://<fqdn>/actuator/health                                                         # {"status":"UP"}
    ```
    El FQDN también aparece en el resumen del run.
@@ -623,7 +677,7 @@ GitHub → **Actions → Apagar → Run workflow**. Detiene la app, verifica `St
 
 Para comprobar que no queda nada cobrando:
 ```bash
-az containerapp show -n perfume-api -g rg-perfume --query properties.runningStatus -o tsv   # Stopped
+az containerapp show -n perfume-api2 -g rg-perfume --query properties.runningStatus -o tsv   # Stopped
 az acr list -g rg-perfume -o table                                                           # vacío
 ```
 
@@ -642,8 +696,10 @@ manuales" desde cero. Después conviene borrar también el service principal
 
 - Región: `chilecentral` (la política de la suscripción de estudiante solo permite
   newzealandnorth, mexicocentral, southafricanorth, chilecentral y northcentralus).
-- Entorno Container Apps **Express**: no admite identidad administrada ni sufijos de revisión (la
-  revisión se llama siempre `perfume-api--latest`). El registry usa usuario administrador.
+- Hasta el 20/10/2026 la app (`perfume-api`) corrió en un entorno **Express** (`perfume-env`): no
+  admite identidad administrada ni sufijos de revisión (la revisión se llamaba siempre
+  `perfume-api--latest`) y no publica métricas de plataforma. Desde el 20/10/2026 corre como
+  **`perfume-api2` en el entorno estándar `perfume-env-std`** (ver "Entorno estándar").
 - Se borró la identidad administrada `id-perfume-acr`, que había quedado de un intento anterior y
   no se usaba (Express no la admite).
 - `az acr build` no funciona en `chilecentral`: la imagen se construye en GitHub Actions y se sube con Docker.
@@ -668,7 +724,8 @@ manuales" desde cero. Después conviene borrar también el service principal
   tendría sus propios datos.
 - **Paridad dev/prod**: en la nube se usa H2 y en desarrollo PostgreSQL. Se atenúa con
   `MODE=PostgreSQL` y con las mismas migraciones de Flyway en los dos.
-- **Usuario admin del ACR**: tiene que quedar habilitado porque Express no admite identidad
-  administrada para descargar la imagen. El pipeline crea el ACR con el usuario admin activado.
+- **Usuario admin del ACR**: la app baja la imagen con el usuario admin (se eligió así cuando el
+  entorno era Express, que no admitía identidad administrada). El pipeline crea el ACR con el
+  usuario admin activado.
 - **ACR efímero**: con todo apagado no hay imágenes guardadas. Prender la app siempre implica
   construir de nuevo (workflow "Levantar", unos minutos), y no existe `/deploy`.

@@ -243,6 +243,9 @@ public class ScriptAz {
                 .redirectError(ProcessBuilder.Redirect.INHERIT)
                 .redirectInput(ProcessBuilder.Redirect.PIPE);
         try {
+            // az es un programa Python: sin esto, si la salida no es una consola, escribe con buffer
+            // y los logs en vivo no aparecen hasta que se corta el streaming
+            pb.environment().put("PYTHONUNBUFFERED", "1");
             Process p = pb.start();
             p.getOutputStream().close();
             while (p.isAlive()) {
@@ -1080,8 +1083,9 @@ public class ScriptAz {
                 logErr("La app '" + config.appName + "' no existe");
                 return false;
             }
-            // Los entornos Express no dan endpoint de streaming (az containerapp logs show falla con
-            // KeyError 'eventStreamEndpoint'): en ese caso se leen los logs de Log Analytics.
+            // En un entorno estandar (perfume-env-std) hay streaming en vivo con az containerapp logs
+            // show --follow. Los entornos Express no dan ese endpoint (falla con KeyError
+            // 'eventStreamEndpoint'): en ese caso se leen los logs de Log Analytics.
             Result endpoint = runCmd(List.of("az", "containerapp", "show", "--name", config.appName,
                     "--resource-group", config.resourceGroup,
                     "--query", "properties.eventStreamEndpoint", "-o", "tsv"), 30);

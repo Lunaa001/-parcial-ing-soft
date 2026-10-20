@@ -24,6 +24,9 @@ env:
   # Application Insights (modo workspace) creado una sola vez a mano en el resource group; no se
   # borra al apagar. Si no existe, el deploy sigue sin telemetria y avisa con un warning.
   APPINSIGHTS_NAME: appi-perfume
+  # Nombre de la app en el mapa de Application Insights. Fijo (no el nombre de la Container App)
+  # para que el historial siga bajo el mismo nombre aunque la app se recree con otro nombre.
+  APPINSIGHTS_ROLE_NAME: perfume-api
   # Recursos de la app. Con el agente de Application Insights, 0.25 vCPU / 0.5 GiB no alcanzaba (no
   # llegaba a arrancar en 4,5 min y la memoria del proceso llega a ~390 MB): con 0.5 / 1 GiB arranca
   # en ~50 s. Solo se cobra mientras esta prendida (entra en el cupo gratis de Container Apps).
@@ -148,7 +151,8 @@ jobs:
           only-fixed: true
           output-format: table
 
-      # Basic + usuario admin (el entorno Express no admite identidad administrada para el pull).
+      # Basic + usuario admin (la app baja la imagen con usuario y contrasena; se mantuvo asi al pasar
+      # del entorno Express, que no admitia identidad administrada, al estandar).
       # El nombre es global en Azure: recien borrado puede tardar en liberarse, por eso los reintentos.
       - name: Crear el ACR si no existe
         id: acr
@@ -201,7 +205,7 @@ jobs:
             echo "::add-mask::$CS"
             az containerapp secret set --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
               --secrets "appinsights-cs=$CS" --output none
-            echo "APPINSIGHTS_ENV=APPLICATIONINSIGHTS_CONNECTION_STRING=secretref:appinsights-cs APPLICATIONINSIGHTS_ROLE_NAME=$CONTAINER_APP_NAME" >> "$GITHUB_ENV"
+            echo "APPINSIGHTS_ENV=APPLICATIONINSIGHTS_CONNECTION_STRING=secretref:appinsights-cs APPLICATIONINSIGHTS_ROLE_NAME=$APPINSIGHTS_ROLE_NAME" >> "$GITHUB_ENV"
             echo "Connection string de Application Insights cargada como secreto appinsights-cs."
           else
             echo "::warning::No existe Application Insights '$APPINSIGHTS_NAME' en $RESOURCE_GROUP: se despliega sin telemetria."

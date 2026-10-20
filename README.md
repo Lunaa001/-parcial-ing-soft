@@ -98,6 +98,9 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun          # Windows: set SPRING_PROF
 - **Costo**: con todo apagado es cero. Solo el registry cobra por existir (~USD 0,17 por día).
 - **Monitoreo**: Application Insights (`appi-perfume`) recibe requests, llamadas a Groq,
   excepciones, logs y métricas de CPU/memoria mediante el agente Java (ver DEPLOY.md).
+- **Métricas de plataforma**: la app (`perfume-api2`) corre en un entorno estándar de Container Apps
+  (`perfume-env-std`), así que el portal muestra memoria, CPU, requests y réplicas en
+  *Supervisión → Métricas*, y hay logs en vivo con `az containerapp logs show --follow`.
 - **Imagen versionada**: cada imagen lleva la versión (`v0.4.0`), el SHA del commit y `latest`; se
   despliega por versión.
 - **Versionado automático**: cada push a `main` crea un tag `vX.Y.Z` según el prefijo del commit
